@@ -25,7 +25,10 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        # v4 avoids the retired SDK "tools" package that breaks v3.
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Install platform 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
