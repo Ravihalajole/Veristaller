@@ -1,6 +1,8 @@
 package dev.veristaller.platform
 
 import android.content.Context
+import dev.veristaller.data.SettingsRepository
+import dev.veristaller.data.StagingStore
 import dev.veristaller.domain.ApkInspector
 import dev.veristaller.domain.BundleInspector
 import dev.veristaller.domain.InstalledAppReader
