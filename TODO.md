@@ -34,18 +34,18 @@ the deliberate v0.1 gaps. Code is static-ready; CI has not yet compiled it.
 - [x] `InstalledAppReader`
 - [x] `Preflight` checks + ack gating
 - [x] Settings (DataStore)
-- [x] History + backups (JSON)
 
 ## M3 — Job engine
+
+No backup, rollback or restore: if a swap fails after `base.apk` was removed, the
+target app must be reinstalled (accepted v0.2 trade-off).
 
 - [x] `JobRunner` pipeline + events
 - [x] Session install with split filter retry ladder
 - [x] Path resolution (depth-agnostic) + safety guard
-- [x] Backup with sha256 verification
 - [x] Atomic swap (verity-aware) + fixup
-- [x] Verify + automatic rollback
+- [x] Verify
 - [x] Dry-run plan
-- [x] Restore from backup
 - [x] Foreground notification service
 
 ## M4 — UI
@@ -55,8 +55,7 @@ the deliberate v0.1 gaps. Code is static-ready; CI has not yet compiled it.
 - [x] Pick bundle / pick patch
 - [x] Review (checks, acks, command preview)
 - [x] Progress (stepper + live log)
-- [x] Result (success / rollback / fail / dry-run)
-- [x] History + backups
+- [x] Result (success / fail / dry-run)
 - [x] Settings
 - [x] Navigation
 
@@ -65,9 +64,10 @@ the deliberate v0.1 gaps. Code is static-ready; CI has not yet compiled it.
 - [ ] First CI build green (fix any compile errors — nothing has been compiled yet)
 - [ ] Install debug APK, grant root, confirm probe (manager, ABI, free space, tools)
 - [ ] Real `.apks` fixture parses correctly (split list, skipped splits, version)
-- [ ] End-to-end job on a test app (install → locate → backup → swap → verify)
-- [ ] Fault injection: abort at each step, confirm rollback and history record
-- [ ] Restore from History and from the result screen
+- [ ] End-to-end job on a test app (install → locate → swap → verify)
+- [ ] Fault injection: abort at each step, confirm typed failures and no crash; a
+      failed swap may require reinstalling the app
+- [ ] Confirm recovery by reinstalling the target app after a failed swap
 - [ ] Bump `compileSdk`/`targetSdk` to 36
 - [ ] Baseline profile, R8 release build
 - [ ] TalkBack + contrast pass
@@ -75,8 +75,10 @@ the deliberate v0.1 gaps. Code is static-ready; CI has not yet compiled it.
 
 ## Known gaps (deliberate, v0.1)
 
+- [x] No backup, history, restore, rollback, undo, retention or interrupted-job
+      recovery (accepted trade-off): recovery from a failed swap is by reinstalling
+      the target app
 - [ ] Cancel a running job (currently disabled while the engine works)
-- [x] Per-command timeline in the history detail dialog (log tail + command lines)
 - [x] Export logs and diagnostics via SAF `CREATE_DOCUMENT`
 - [ ] Recent-file shortcuts with persisted SAF permissions (FR-2.6, should)
 - [ ] Bundle split certificate vs patch warning (FR-3.5, should)
@@ -86,8 +88,4 @@ the deliberate v0.1 gaps. Code is static-ready; CI has not yet compiled it.
 - [ ] Localisation extraction (strings are inline in v0.1)
 - [ ] `gradle wrapper` committed (CI uses `setup-gradle`)
 - [ ] Unit tests for `Preflight` and split selection (`ShellParsing` covered)
-- [x] Process-death recovery banner with verified restore (`job.inprogress` marker)
-- [ ] Automatic restore without user confirmation (manual banner action in v0.1)
 - [ ] Roman/per-locale string resources (all UI strings inline in v0.1)
-- [ ] `keepBackups=0` means "no backup" per SRS FR-12.2; shipped code keeps every
-      backup and shows a red warning so a swap is never backup-free

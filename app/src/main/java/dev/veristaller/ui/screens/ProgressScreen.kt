@@ -94,9 +94,7 @@ fun ProgressScreen(vm: AppViewModel, onHome: () -> Unit) {
     ) {
         Spacer(Modifier.height(4.dp))
         StepStrip(step = job.step, completed = job.completed)
-        if (job.outcome is dev.veristaller.domain.model.Outcome.Failed ||
-            job.outcome is dev.veristaller.domain.model.Outcome.RolledBack
-        ) {
+        if (job.outcome is dev.veristaller.domain.model.Outcome.Failed) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "Stopped at ${job.step?.label ?: "an early check"}. See the log below.",

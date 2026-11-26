@@ -51,27 +51,19 @@ enum class ErrorCode(val title: String, val hint: String) {
     ),
     E_SWAP_FAILED(
         "Couldn't replace base.apk",
-        "The backup is intact. Check free space and the log.",
-    ),
-    E_BACKUP_FAILED(
-        "Couldn't create a verified backup",
-        "Nothing was replaced. Check free space and try again.",
+        "Check free space and the log. A failed swap may leave the app unusable.",
     ),
     E_VERITY_LOCKED(
         "The system protects this APK (fs-verity)",
-        "The original was restored. This ROM may not allow file swaps.",
+        "This ROM may not allow file swaps. Reinstall the app to recover.",
     ),
     E_SELINUX_DENIED(
         "Couldn't set the APK security label",
-        "The original was restored. Check dmesg for avc denials.",
+        "Check dmesg for avc denials. Reinstall the app to recover.",
     ),
     E_VERIFY_FAILED(
         "The swap didn't verify",
-        "Size, ownership or SELinux label was wrong. The backup was restored.",
-    ),
-    E_ROLLBACK_FAILED(
-        "Manual recovery needed",
-        "The backup could not be restored automatically. Use the path in the log.",
+        "Size, ownership or the SELinux label was wrong. Reinstall the app to recover.",
     ),
     E_ALREADY_RUNNING(
         "A job is already running",

@@ -1,7 +1,6 @@
 package dev.veristaller.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -51,7 +49,6 @@ import dev.veristaller.ui.components.MonoText
 import dev.veristaller.ui.components.Pill
 import dev.veristaller.ui.components.ScreenFrame
 import dev.veristaller.ui.components.SectionLabel
-import dev.veristaller.ui.components.TonalButton
 import dev.veristaller.ui.components.VeriCard
 import dev.veristaller.ui.components.formatBytes
 import dev.veristaller.ui.theme.DangerRed
@@ -70,7 +67,6 @@ import dev.veristaller.ui.theme.WarningAmber
 fun SettingsScreen(
     vm: AppViewModel,
     onHome: () -> Unit,
-    onHistory: () -> Unit,
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val facts by vm.facts.collectAsStateWithLifecycle()
@@ -88,7 +84,6 @@ fun SettingsScreen(
             BottomNav(
                 selected = "settings",
                 onHome = onHome,
-                onHistory = onHistory,
                 onSettings = {},
             )
         },
@@ -183,37 +178,10 @@ fun SettingsScreen(
         Spacer(Modifier.height(14.dp))
         SectionLabel("Safety")
         VeriCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Keep backups",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextPrimary,
-                    )
-                    Text(
-                        if (settings.keepBackups == 0) {
-                            "0 keeps every backup. Delete old copies manually."
-                        } else {
-                            "Per package, newest ${settings.keepBackups}."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (settings.keepBackups == 0) DangerRed else TextSecondary,
-                    )
-                }
-                Stepper(
-                    value = settings.keepBackups,
-                    onChange = { value ->
-                        vm.updateSettings { it.copy(keepBackups = value.coerceIn(0, 10)) }
-                    },
-                )
-            }
-            Divider()
-            ToggleRow(
-                title = "Confirm before restoring",
-                detail = "Restoring replaces the current base.apk. Always on.",
-                checked = true,
-                enabled = false,
-                onCheckedChange = {},
+            Text(
+                "No backup is taken before a swap. If a swap fails, reinstall the app to recover.",
+                style = MaterialTheme.typography.bodySmall,
+                color = WarningAmber,
             )
             Divider()
             Text("Theme", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
@@ -237,7 +205,7 @@ fun SettingsScreen(
         VeriCard {
             ToggleRow(
                 title = "Vibrate when a job finishes",
-                detail = "A short pulse on success, failure or rollback.",
+                detail = "A short pulse on success or failure.",
                 checked = settings.vibrate,
                 onCheckedChange = { value -> vm.updateSettings { it.copy(vibrate = value) } },
             )
@@ -333,8 +301,6 @@ fun SettingsScreen(
             )
         }
 
-        Spacer(Modifier.height(14.dp))
-        TonalButton(text = "Clear job history", onClick = vm::clearHistory)
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -438,44 +404,6 @@ private fun <T> ChoiceRow(
 }
 
 @Composable
-private fun Stepper(value: Int, onChange: (Int) -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceHigh)
-            .border(1.dp, OutlineColor, RoundedCornerShape(12.dp)),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StepButton("−", enabled = value > 0) { onChange(value - 1) }
-        Text(
-            text = if (value == 0) "all" else value.toString(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextPrimary,
-            modifier = Modifier.width(40.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        StepButton("+", enabled = value < 10) { onChange(value + 1) }
-    }
-}
-
-@Composable
-private fun StepButton(label: String, enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .clickable(enabled = enabled, onClickLabel = label, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.titleMedium,
-            color = if (enabled) PrimaryBlue else TextTertiary,
-        )
-    }
-}
-
-@Composable
 private fun Divider() {
     Box(
         Modifier
@@ -495,7 +423,6 @@ private fun diagnostics(
     appendLine("theme=${settings.theme}")
     appendLine("dynamicColor=${settings.dynamicColor}")
     appendLine("splitMode=${settings.splitMode.name}")
-    appendLine("keepBackups=${settings.keepBackups}")
     appendLine("clearOat=${settings.clearOat}")
     appendLine("smokeTest=${settings.smokeTest}")
     appendLine("verboseLogs=${settings.verboseLogs}")

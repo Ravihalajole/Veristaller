@@ -27,19 +27,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.veristaller.data.BackupRecord
-import dev.veristaller.data.JobRecord
 import dev.veristaller.domain.model.JobUiState
+import dev.veristaller.domain.model.Outcome
 import dev.veristaller.root.DeviceFacts
 import dev.veristaller.ui.AppViewModel
 import dev.veristaller.ui.components.BottomNav
@@ -50,9 +47,7 @@ import dev.veristaller.ui.components.ScreenFrame
 import dev.veristaller.ui.components.SectionLabel
 import dev.veristaller.ui.components.VeriCard
 import dev.veristaller.ui.components.formatBytes
-import dev.veristaller.ui.components.formatRelative
 import dev.veristaller.ui.theme.DangerRed
-import dev.veristaller.ui.theme.InfoPurple
 import dev.veristaller.ui.theme.OutlineColor
 import dev.veristaller.ui.theme.PrimaryBlue
 import dev.veristaller.ui.theme.SuccessGreen
@@ -66,21 +61,16 @@ import dev.veristaller.ui.theme.WarningAmber
 fun HomeScreen(
     vm: AppViewModel,
     onNewInstall: () -> Unit,
-    onHistory: () -> Unit,
     onSettings: () -> Unit,
     onOpenResult: () -> Unit,
 ) {
     val facts by vm.facts.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val settingsReady by vm.settingsReady.collectAsStateWithLifecycle()
-    val history by vm.history.collectAsStateWithLifecycle()
-    val backups by vm.backups.collectAsStateWithLifecycle()
     val job by vm.job.collectAsStateWithLifecycle()
-    val recovery by vm.recovery.collectAsStateWithLifecycle()
 
     var showDisclosure by rememberSaveable { mutableStateOf(false) }
     var showRootDetails by rememberSaveable { mutableStateOf(false) }
-    var confirmBackup by rememberSaveable { mutableStateOf<BackupRecord?>(null) }
     LaunchedEffect(settings.disclosureAccepted, settingsReady) {
         showDisclosure = settingsReady && !settings.disclosureAccepted
     }
@@ -100,47 +90,15 @@ fun HomeScreen(
             BottomNav(
                 selected = "home",
                 onHome = {},
-                onHistory = onHistory,
                 onSettings = onSettings,
             )
         },
     ) {
         Spacer(Modifier.height(4.dp))
-        recovery?.let { incomplete ->
-            VeriCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, WarningAmber, RoundedCornerShape(14.dp)),
-            ) {
-                SectionLabel("Interrupted job")
-                Text(
-                    "A previous run stopped while base.apk was being replaced for " +
-                        "${incomplete.packageName}. Restore the verified backup to be safe.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row {
-                    TextButton(onClick = { vm.restoreIncomplete() }) {
-                        Text("Restore backup", color = WarningAmber, fontWeight = FontWeight.SemiBold)
-                    }
-                    TextButton(onClick = { vm.dismissRecovery() }) {
-                        Text("Dismiss")
-                    }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-        }
         NewInstallCard(enabled = facts?.isRoot == true, onClick = onNewInstall)
         DeviceCard(facts)
-        LastJobCard(
-            job = job,
-            lastRecord = history.firstOrNull(),
-            lastBackup = backups.maxByOrNull { it.createdAt },
-            onOpen = onOpenResult,
-            onRestore = { confirmBackup = it },
-        )
-        InfoNote("Only /data/app is modified. A hash-verified backup is taken before every swap.")
+        LastJobCard(job = job, onOpen = onOpenResult)
+        InfoNote("Only /data/app is modified. No backup is taken — reinstall the app to undo a failed swap.")
         Spacer(Modifier.height(10.dp))
     }
 
@@ -172,32 +130,6 @@ fun HomeScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showRootDetails = false }) { Text("Close") }
-            },
-        )
-    }
-
-    confirmBackup?.let { backup ->
-        AlertDialog(
-            onDismissRequest = { confirmBackup = null },
-            title = { Text("Restore last backup?") },
-            text = {
-                Text(
-                    "Replace base.apk with ${backup.versionName ?: backup.versionCode}. " +
-                        "The app will be stopped and a verified hash check will run.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.restore(backup)
-                    confirmBackup = null
-                }) {
-                    Text("Restore", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmBackup = null }) { Text("Cancel") }
             },
         )
     }
@@ -285,13 +217,7 @@ private fun DeviceCard(facts: DeviceFacts?) {
 }
 
 @Composable
-private fun LastJobCard(
-    job: JobUiState,
-    lastRecord: JobRecord?,
-    lastBackup: BackupRecord?,
-    onOpen: () -> Unit,
-    onRestore: (BackupRecord) -> Unit,
-) {
+private fun LastJobCard(job: JobUiState, onOpen: () -> Unit) {
     VeriCard(modifier = Modifier.padding(top = 12.dp)) {
         SectionLabel("Last job")
         when {
@@ -301,72 +227,51 @@ private fun LastJobCard(
                 Text("Job running · ${job.title}", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
             }
 
-            lastRecord != null -> Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable(
-                        onClickLabel = "Open last result",
-                        onClick = onOpen,
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
+            job.outcome != null -> Row(
+                modifier = Modifier.fillMaxWidth().clickable(
+                    onClickLabel = "Open last result",
+                    onClick = onOpen,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(SurfaceHigh),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(SurfaceHigh),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = lastRecord.label.take(1).uppercase(),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = PrimaryBlue,
-                        )
-                    }
-                    Spacer(Modifier.width(11.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(lastRecord.label, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                        Text(
-                            text = "${lastRecord.versionName ?: "?"} · ${formatRelative(lastRecord.timestamp)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                        )
-                    }
-                    Pill(
-                        text = lastRecord.status.replace('_', ' '),
-                        color = statusColor(lastRecord.status),
-                        background = statusColor(lastRecord.status).copy(alpha = 0.09f),
+                    Text(
+                        text = job.packageName.take(1).uppercase().ifBlank { "?" },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = PrimaryBlue,
                     )
                 }
-                if (lastBackup != null) {
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(
-                        onClick = { onRestore(lastBackup) },
-                        modifier = Modifier.height(32.dp),
-                    ) {
-                        Text(
-                            "Restore last backup · ${lastBackup.versionName ?: lastBackup.versionCode}",
-                            color = PrimaryBlue,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                Spacer(Modifier.width(11.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        job.packageName.ifBlank { "Last job" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                    )
+                    Text("Open result", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
+                val (status, color) = when (job.outcome) {
+                    is Outcome.Success -> "success" to SuccessGreen
+                    is Outcome.Failed -> "failed" to DangerRed
+                    is Outcome.DryRun -> "dry run" to WarningAmber
+                    else -> "unknown" to TextTertiary
+                }
+                Pill(text = status, color = color, background = color.copy(alpha = 0.09f))
             }
 
             else -> Text(
-                "No jobs yet. Pick a bundle to begin.",
+                "No result yet. Pick a bundle to begin.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
             )
         }
     }
-}
-
-@Composable
-fun statusColor(status: String): Color = when (status) {
-    JobRecord.STATUS_SUCCESS, JobRecord.STATUS_RESTORED -> SuccessGreen
-    JobRecord.STATUS_ROLLED_BACK -> WarningAmber
-    JobRecord.STATUS_FAILED -> DangerRed
-    else -> InfoPurple
 }
 
 @Composable
@@ -383,11 +288,11 @@ private fun DisclosureDialog(onAccept: () -> Unit) {
                 )
                 Bullet("Root is required. Every privileged action runs through your root manager's su.")
                 Bullet("Only /data/app is touched. System partitions stay read-only.")
-                Bullet("A verified backup is taken first, and restored automatically if anything fails.")
+                Bullet("No backup is taken. A failed swap may leave the app unusable until you reinstall it.")
                 Text(
                     "A modified app can break after an app update, or trigger its own tamper checks. " +
                         "In the worst case a mistake can require a factory reset or ROM reflash. " +
-                        "Keep the backup until you have tested it.",
+                        "Keep a copy of the original APK if you may need it again.",
                     style = MaterialTheme.typography.bodySmall,
                     color = WarningAmber,
                 )

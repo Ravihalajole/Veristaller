@@ -39,7 +39,10 @@ class RootProbe(
         _busy.value = true
         try {
             if (!shell.isRoot()) {
-                _facts.value = fallback("Root access not granted")
+                _facts.value = fallback(
+                    "Root not granted to Veristaller. Allow it in KernelSU/Magisk/APatch, " +
+                        "then tap the root chip to re-check.",
+                )
                 return
             }
             val output = shell.exec(RootOps.probe())

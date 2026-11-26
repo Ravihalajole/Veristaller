@@ -1,8 +1,9 @@
 # Veristaller
 
 A root-only Android tool that installs a split bundle, then replaces the installed
-app's `base.apk` with a patched one — atomically, with a verified backup and a
-one-tap undo.
+app's `base.apk` with a patched one. No backup is taken and there is no undo or
+automatic rollback: if a swap fails after the original APK was removed, recovery is
+by reinstalling the target app. This is an accepted v0.2 trade-off.
 
 This repository holds the **plan and specification**, the **clickable GUI prototype**,
 and a **complete first-pass Android implementation** (Kotlin + Compose). The code has
@@ -39,7 +40,7 @@ Studio generate one (`gradle wrapper --gradle-version 8.9`).
 | `docs/UI_SPEC.md` | Screen-by-screen spec, design tokens, copy rules, Compose mapping |
 | `docs/SPIKE.md` | The M0 hands-on validation script/checklist (run this first) |
 | `scripts/m0-probe.sh` | Read-only device probe: root, tools, code path, attrs, verity hints, splits |
-| `design/prototype.html` | Clickable prototype — 10 screens + board view |
+| `design/prototype.html` | Clickable prototype — 8 screens + board view |
 | `app/` | Android app: root layer, inspectors, job engine, Compose UI |
 | `.github/workflows/android.yml` | CI: JDK 17, Gradle 8.9, `assembleDebug`, APK artifact |
 | `TODO.md` | Milestone checklist and deliberate v0.1 gaps |
@@ -52,7 +53,7 @@ On the phone, open:
 file:///storage/emulated/0/workspace/Veristaller/design/prototype.html
 ```
 
-`Flow` walks the real user journey (pick two files → review → 7-stage job → result).
+`Flow` walks the real user journey (pick two files → review → 6-stage job → result).
 `Board` shows every screen at once for design review. No server, no network, no
 build step.
 
@@ -68,9 +69,9 @@ build step.
 | Swap mechanism | sibling temp file → `chown 1000:1000` + `chmod 0644` + `chcon apk_data_file` → `rm` + `mv` (fs-verity aware) → `restorecon -F` → clear `oat/` |
 | Path discovery | `pm path` + `codePath` cross-check, then bounded `find` — **never** a hardcoded depth |
 | Verification | size, owner, mode, SELinux label, `pm path`, optional launch + crash-log scan |
-| Undo | hash-verified backup in `/data/local/tmp/veristaller/backups`, automatic rollback, manual restore from History |
+| Backup / undo | None. No backup is taken, no rollback or restore UI; recovery from a failed swap is by reinstalling the target app (accepted trade-off) |
 | Permissions | **no `INTERNET`**, no analytics, nothing exported |
-| Persistence | DataStore + JSON (no Room) |
+| Persistence | DataStore for settings (no Room, no persisted job history or backups) |
 | Build | AGP 8.7.3, `minSdk 26`, `compileSdk`/`targetSdk` 35, debug APK |
 
 ## The three unknowns (why M0 comes first)
@@ -100,5 +101,6 @@ results table; `scripts/m0-probe.sh` collects the device facts.
 
 Push to GitHub and let CI produce the first APK. Then run the M0 probe
 (`scripts/m0-probe.sh`) on the target device and fill in `docs/SPIKE.md` §4 — the
-swap engine is written to report fs-verity and SELinux failures with a verified
-rollback, but only hardware can confirm the three unknowns above.
+swap engine is written to report fs-verity and SELinux failures as typed results,
+but only hardware can confirm the three unknowns above. A failed swap may leave the
+target app unusable until it is reinstalled.

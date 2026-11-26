@@ -22,8 +22,8 @@ SDK here. The only compile/test gate is `.github/workflows/android.yml`.
 | M0 — feasibility spike | **Not run** | `scripts/m0-probe.sh`, results belong in `docs/SPIKE.md` §4. Verity, reboot signature scan and split-loading verdicts are still open. This is the product go/no-go gate, not a code gap. |
 | M1 — scaffold + root layer | Implemented | Single `:app`, manual `AppContainer`, `RootShell` + `ShellScript` + `shQuote`, `RootProbe`, `RootOps`, CI workflow. |
 | M2 — input, inspection, preflight | Implemented (with S/C gaps below) | SAF staging, four bundle formats, `ApkInspector`, `InstalledAppReader`, `Preflight`, Review screen. |
-| M3 — job engine | Implemented | `JobRunner` stage → install ladder → locate → backup → swap → fixup → verify → rollback; dry run; restore; recovery marker; foreground notification service. |
-| M4 — UI | Implemented (static a11y pass done) | All string routes in `VeristallerRoot`, Home/Bundle/Patch/Review/Progress/Result/History/Settings, dark/light/system themes, disclosure and destructive confirmations. Physical TalkBack pass remains in M5. |
+| M3 — job engine | Implemented | `JobRunner` stage → install ladder → locate → swap → fixup → verify → optional smoke; dry run; foreground notification service. No backup, rollback, restore or recovery marker. |
+| M4 — UI | Implemented (static a11y pass done) | String routes in `VeristallerRoot`, Home/Bundle/Patch/Review/Progress/Result/Settings, dark/light/system themes, disclosure and destructive confirmations; no History screen. Physical TalkBack pass remains in M5. |
 | M5 — verification / hardening | **Pending** | First CI build, device matrix, fault injection, real bundle fixture, TalkBack/contrast, SDK 36 bump, R8/baseline, bound service. |
 
 ---
@@ -34,6 +34,11 @@ SDK here. The only compile/test gate is `.github/workflows/android.yml`.
 claim device validation. `Deferred` is an explicit v0.1 gap recorded in `TODO.md`.
 `Deviates` means the shipped behaviour differs from the SRS text and is called out
 because it affects safety or UX.
+
+FR-6 (Backup), FR-9 (Rollback and restore), FR-10 (History), FR-11.1 (per-job log
+file), FR-12.2 (retention), FR-13.3 (restore shortcut) and FR-13.4 (interrupted-job
+recovery) were removed in v0.2. No backup is taken and there is no in-app undo;
+recovery from a failed swap is by reinstalling the target app (accepted trade-off).
 
 | Requirement | Status | Implementation |
 |---|---|---|
@@ -69,11 +74,6 @@ because it affects safety or UX.
 | FR-5.2 bounded downward + upward `find` | Done | `JobRunner.resolve()` |
 | FR-5.3 `/data/app/**/base.apk` guard | Done | `ShellParsing.guard()` + resolver checks; `..` and symlinks rejected |
 | FR-5.4 writable, non-symlink, package in path | Done | Same guard; read-only mount is covered by the failure path |
-| FR-6.1 hash-verified backup | Done | `BackupRepository.create()` |
-| FR-6.2 `meta.json` | Done | `BackupRecord` encoded beside the copy |
-| FR-6.3 pre-swap hash comparison | Done | `sha256sum` pair compared before `base.apk` is touched |
-| FR-6.4 retention 0–10 | Deviates | Code treats `0` as **keep every backup** (safer; no backup-free swap). A WARN explains this. SRS text says `0` disables backups. |
-| FR-6.5 backups in History + restore | Done | `HistoryScreen` Backups tab, Home restore, Result restore |
 | FR-7.1 force-stop + process check | Done | `RootOps.forceStop()` with `pidof` verification |
 | FR-7.2 sibling temp file | Done | `.base.apk.vst.tmp` in the resolved directory |
 | FR-7.3 attrs before rename | Done | `RootOps.fixupApk()`; `1000:1000`, `0644`, `apk_data_file` |
@@ -87,29 +87,17 @@ because it affects safety or UX.
 | FR-8.2 owner/mode/context verify | Done | `JobRunner.verify()` via `stat`/`ls -Z` |
 | FR-8.3 opt-in smoke test | Done | `RootOps.smokeTest()`, `StepId.SMOKE`; crash/inconclusive/ok never fails the job |
 | FR-8.4 live post-swap version re-read | Deferred (C) | Result shows recorded versions; no live `dumpsys package` re-read / `lastUpdateTime` note |
-| FR-9.1 automatic rollback | Done | Failure after swap attempts verified restore |
-| FR-9.2 manual restore | Done | `JobRunner.restore()` from Home, History and Result |
-| FR-9.3 copyable recovery block | Done | `ResultScreen.FailureBody()` |
-| FR-9.4 history with timings/path/error/log | Done | `HistoryRepository`, `JobRecord` |
-| FR-10.1 newest-first job list | Done | `HistoryScreen` |
-| FR-10.2 timeline + commands | Done | `JobDetailDialog` reads the persisted log |
-| FR-10.3 long-press actions | Done | Restore / export log / delete entry and backup |
-| FR-10.4 cap 200 entries | Done | `HistoryRepository` pruning |
-| FR-11.1 per-job log file | Done | `JobLogStore` at `files/logs/<jobId>.log` |
-| FR-11.2 live monospace log + pause | Done | `ProgressScreen` with drag-to-pause and expand |
-| FR-11.3 SAF diagnostic export | Done | `ExportLogButton` in Result, History and Settings; job log + device facts, no keys |
+| FR-11.2 live monospace log + pause | Done | `ProgressScreen` with drag-to-pause and expand; in-memory only |
+| FR-11.3 SAF diagnostic export | Done | `ExportLogButton` in Result and Settings; live log + device facts, no keys |
 | FR-11.4 cert truncation only | Done | `ApkInfo.certShort`, 8-char preflight display; no full cert logged |
 | FR-12.1 dry run | Done | `JobPlan.preview()`, no `/data/app` mutation |
-| FR-12.2 retention control | Deviates | See FR-6.4; UI warning is red for `0` |
 | FR-12.3 installer attribution | Done | Settings validation regex + default `com.android.vending` |
 | FR-12.4 clear oat | Done | Toggle wired to `JobOptions.clearOat` |
 | FR-12.5 split mode | Done | `SplitMode` choice row |
 | FR-12.6 screen-on + vibration | Done | `VeristallerRoot` flags; `VIBRATE` permission |
 | FR-12.7 theme + dynamic colour | Done | `VeristallerTheme`, API 31+ guard |
-| FR-13.1 first-run disclosure | Done | Home dialog, persisted in DataStore, re-openable in Settings |
-| FR-13.2 destructive confirmations | Done | Review Start dialog, restore/delete dialogs, force-on restore confirmation |
-| FR-13.3 restore in ≤ 2 taps | Done | Home "Restore last backup" + confirmation |
-| FR-13.4 interrupted-job recovery | Done (manual) | `JobRecovery` marker, Home banner, user-confirmed restore; no automatic restore |
+| FR-13.1 first-run disclosure | Done | Home dialog, persisted in DataStore, re-openable in Settings; states that no backup is taken |
+| FR-13.2 destructive confirmations | Done | Review Start dialog and danger confirmations; copy says recovery means reinstalling the app |
 
 ---
 
@@ -125,15 +113,15 @@ because it affects safety or UX.
 | NFR-9 accessibility | Static pass / device pending | Labels/`onClickLabel`, ≥48 dp targets, light/dark contrast tokens; TalkBack pass is M5. |
 | NFR-10 localisation | Deferred | All UI strings are inline in v0.1, as recorded in `TODO.md`. |
 | NFR-11 no background polling | Static pass | Root probe is user/VM triggered; foreground service only during a job. |
-| NFR-12 privacy | Static pass | App-private logs and backups; export only on user action. |
+| NFR-12 privacy | Static pass | In-memory job log only; export on user action. No backups or persisted job data. |
 
 | Acceptance | Status |
 |---|---|
 | AC-1 device matrix swap/launch | Pending M0/M5 hardware run |
 | AC-2 stock attrs match | Pending device baseline comparison |
-| AC-3 fault injection launchable state | Pending; code paths and rollback exist |
+| AC-3 fault injection typed result | Pending; typed failure paths exist, but a failed swap can leave the app unusable until reinstalled |
 | AC-4 root denied, no crash | Static pass; device confirmation pending |
-| AC-5 verified history restore | Pending device run |
+| AC-5 reinstall recovery | Pending device run; no history/restore exists, reinstalling the target app is the only recovery path |
 | AC-6 no `INTERNET` | Static pass; CI `assembleDebug` still required |
 | AC-7 verbatim privileged commands in log | Static pass via `RootShell.commandListener` |
 | AC-8 dry run writes nothing | Static pass; device `find -newer` / hash check pending |
@@ -145,8 +133,10 @@ because it affects safety or UX.
 These are intentionally not implemented in this pass. They are listed in `TODO.md`
 so they are not mistaken for regressions:
 
+- Backups, history, restore/rollback/undo, retention, per-job log files and
+  interrupted-job recovery were removed in v0.2 (accepted trade-off): recovery is
+  by reinstalling the target app.
 - Cancel a running job.
-- Automatic restore after process death (the manual recovery banner is implemented).
 - Recent-file shortcuts with persisted SAF URIs (FR-2.6).
 - Split-certificate mismatch warning (FR-3.5).
 - Bundle-only execution mode (FR-4.6).
@@ -158,9 +148,6 @@ so they are not mistaken for regressions:
 - Bound-service ownership of job state; the service is notification-only today.
 - SDK 36 bump, baseline profile/R8 release validation.
 
-The `keepBackups = 0` behaviour intentionally deviates from the SRS text: it keeps
-all backups instead of allowing a backup-free swap, and surfaces a red warning.
-
 ---
 
 ## 5. Closing the audit
@@ -169,6 +156,7 @@ all backups instead of allowing a backup-free swap, and surfaces a red warning.
    any compiler diagnostics reported there; none can be reproduced locally.
 2. Run `scripts/m0-probe.sh` and fill `docs/SPIKE.md` §4. That decides whether the
    file-swap mechanism is viable on the target ROMs.
-3. Run the M5 device/fault-injection checklist and record results here.
+3. Run the M5 device/fault-injection checklist (including reinstall recovery) and
+   record results here.
 4. Treat the deferred list above as a product decision: none of it blocks the
    must-have v0.1 flow, but each item remains visible rather than silently dropped.

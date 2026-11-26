@@ -1,27 +1,17 @@
 package dev.veristaller.job
 
 import android.content.Context
-import dev.veristaller.data.BackupRecord
-import dev.veristaller.data.BackupRepository
-import dev.veristaller.data.HistoryRepository
-import dev.veristaller.data.IncompleteJob
-import dev.veristaller.data.JobLogStore
-import dev.veristaller.data.JobRecord
-import dev.veristaller.data.JobRecovery
 import dev.veristaller.data.StagingStore
 import dev.veristaller.domain.BundleInspector
-import dev.veristaller.domain.InstalledAppReader
 import dev.veristaller.domain.JobPlan
 import dev.veristaller.domain.error.VeristallerException
 import dev.veristaller.domain.model.ErrorCode
-import dev.veristaller.domain.model.InstalledAppInfo
 import dev.veristaller.domain.model.JobError
 import dev.veristaller.domain.model.JobLogLine
 import dev.veristaller.domain.model.JobSpec
 import dev.veristaller.domain.model.JobUiState
 import dev.veristaller.domain.model.Outcome
 import dev.veristaller.domain.model.ResolvedPath
-import dev.veristaller.domain.model.SplitApk
 import dev.veristaller.domain.model.SplitMode
 import dev.veristaller.domain.model.StepId
 import dev.veristaller.domain.model.SwapDetails
@@ -39,18 +29,14 @@ import kotlinx.coroutines.sync.Mutex
 import java.io.File
 
 /**
- * The whole privileged pipeline: stage -> install -> locate -> backup -> swap
- * -> fixup -> verify, with automatic rollback and a dry-run mode.
+ * The privileged pipeline: stage -> install -> locate -> swap -> fixup ->
+ * verify, with a dry-run mode and a live log.
  */
 class JobRunner(
     private val context: Context,
     private val shell: RootShell,
     private val staging: StagingStore,
     private val bundleInspector: BundleInspector,
-    private val installedReader: InstalledAppReader,
-    private val backups: BackupRepository,
-    private val history: HistoryRepository,
-    private val recovery: JobRecovery,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -59,12 +45,7 @@ class JobRunner(
     private val _state = MutableStateFlow(JobUiState())
     val state: StateFlow<JobUiState> = _state.asStateFlow()
 
-    private var logStore: JobLogStore? = null
-
     fun start(spec: JobSpec): Boolean = launch { runJob(spec) }
-
-    fun restore(record: BackupRecord, app: InstalledAppInfo): Boolean =
-        launch { runRestore(record, app) }
 
     fun clearOutcome() {
         if (!_state.value.running) _state.value = JobUiState()
@@ -94,7 +75,6 @@ class JobRunner(
         _state.value = _state.value.copy(
             log = (_state.value.log + line).takeLast(MAX_LOG_LINES),
         )
-        logStore?.append(line.text, line.time)
     }
 
     /** Every privileged command, with its raw output, lands in the job log. */
@@ -133,7 +113,6 @@ class JobRunner(
 
     private suspend fun runJob(spec: JobSpec) {
         val startedAt = System.currentTimeMillis()
-        logStore = JobLogStore(context, spec.jobId)
         _state.value = JobUiState(
             running = true,
             jobId = spec.jobId,
@@ -142,10 +121,6 @@ class JobRunner(
         )
         JobService.start(context, spec.patch.packageName)
         attachCommandLogging(spec.options.verboseLogs)
-
-        var backup: BackupRecord? = null
-        var swapped = false
-        lastResolved = null
 
         try {
             if (!shell.isRoot()) {
@@ -187,7 +162,6 @@ class JobRunner(
             if (spec.options.dryRun) {
                 val plan = JobPlan.preview(spec, selected)
                 plan.forEach { log(it, JobLogLine.Kind.DIM) }
-                saveRecord(spec, JobRecord.STATUS_DRY_RUN, null, spec.installed.baseApk, null, startedAt)
                 _state.value = _state.value.copy(
                     running = false,
                     outcome = Outcome.DryRun(plan),
@@ -211,33 +185,6 @@ class JobRunner(
             }
             log("base.apk ${resolved.baseApk}", JobLogLine.Kind.DIM)
 
-            val record = step(StepId.BACKUP, "Backing up base.apk") {
-                // The install may have changed the version, so re-read the app.
-                val current = installedReader.read(spec.patch.packageName)
-                val created = backups.create(
-                    spec.installed.copy(
-                        baseApk = resolved.baseApk,
-                        codePath = resolved.directory,
-                        versionCode = current?.versionCode ?: spec.installed.versionCode,
-                        versionName = current?.versionName ?: spec.installed.versionName,
-                        label = current?.label ?: spec.installed.label,
-                    ),
-                    current?.versionName ?: spec.patch.versionName,
-                )
-                log("sha256 ${created.sha256.take(16)}… verified", JobLogLine.Kind.DIM)
-                created
-            }
-            backup = record
-            recovery.write(
-                IncompleteJob(
-                    jobId = spec.jobId,
-                    packageName = spec.patch.packageName,
-                    basePath = resolved.baseApk,
-                    backupPath = record.path,
-                    startedAt = startedAt,
-                ),
-            )
-
             // Hash the exact file that will be swapped in, so verify can prove
             // the bytes on disk are the patched APK and not a partial copy.
             val patchHash = ShellParsing.sha256(
@@ -248,9 +195,6 @@ class JobRunner(
             )
 
             step(StepId.SWAP, "Replacing base.apk") {
-                // From here the original file may be removed, so any failure
-                // (even before the move) must restore the verified backup.
-                swapped = true
                 swap(spec, resolved)
             }
 
@@ -269,7 +213,7 @@ class JobRunner(
             }
 
             val details = step(StepId.VERIFY, "Verifying the swap") {
-                verify(spec, resolved, record.path, patchHash)
+                verify(spec, resolved, patchHash)
             }
 
             if (spec.options.smokeTest) {
@@ -288,60 +232,23 @@ class JobRunner(
                 }
             }
 
-            val recordId = saveRecord(
-                spec,
-                JobRecord.STATUS_SUCCESS,
-                null,
-                resolved.baseApk,
-                record.path,
-                startedAt,
-            )
-            backups.prune(spec.patch.packageName, spec.options.keepBackups)
             _state.value = _state.value.copy(
                 running = false,
                 progress = 1f,
                 completed = StepId.entries.toSet(),
-                outcome = Outcome.Success(details, recordId),
+                outcome = Outcome.Success(details),
             )
             log("done in ${System.currentTimeMillis() - startedAt} ms", JobLogLine.Kind.OK)
         } catch (t: Throwable) {
             val error = toJobError(t)
             log("failed: ${error.message}", JobLogLine.Kind.ERR)
-
-            val backupRef = backup
-            val resolvedRef = lastResolved
-            var rolledBack = false
-            if (swapped && backupRef != null && resolvedRef != null) {
-                rolledBack = rollback(backupRef, resolvedRef, spec.patch.packageName)
-            }
-
-            saveRecord(
-                spec,
-                if (rolledBack) JobRecord.STATUS_ROLLED_BACK else JobRecord.STATUS_FAILED,
-                error,
-                resolvedRef?.baseApk,
-                backupRef?.path,
-                startedAt,
-            )
-            _state.value = _state.value.copy(
-                running = false,
-                outcome = if (rolledBack) {
-                    Outcome.RolledBack(error, null)
-                } else {
-                    Outcome.Failed(error)
-                },
-            )
+            _state.value = _state.value.copy(running = false, outcome = Outcome.Failed(error))
         } finally {
-            // A dry run never writes the marker; don't erase one from an
-            // earlier interrupted job.
-            if (backup != null) recovery.clear()
             detachCommandLogging()
             staging.deleteJobDir(spec.jobId)
             JobService.stop(context)
         }
     }
-
-    private var lastResolved: ResolvedPath? = null
 
     // ------------------------------------------------------------------
 
@@ -507,9 +414,7 @@ class JobRunner(
             )
         }
 
-        val resolved = ResolvedPath(directory = base.substringBeforeLast('/'), baseApk = base)
-        lastResolved = resolved
-        return resolved
+        return ResolvedPath(directory = base.substringBeforeLast('/'), baseApk = base)
     }
 
     private suspend fun swap(spec: JobSpec, path: ResolvedPath): Boolean {
@@ -566,7 +471,6 @@ class JobRunner(
     private suspend fun verify(
         spec: JobSpec,
         path: ResolvedPath,
-        backupPath: String,
         expectedHash: String,
     ): SwapDetails {
         val statOut = shell.exec(RootOps.stat(path.baseApk))
@@ -631,176 +535,10 @@ class JobRunner(
             mode = stat.mode,
             selinux = context,
             sizeBytes = stat.size,
-            backupPath = backupPath,
         )
-    }
-
-    private suspend fun rollback(
-        backup: BackupRecord,
-        path: ResolvedPath,
-        packageName: String,
-    ): Boolean {
-        log("rolling back to the verified backup…", JobLogLine.Kind.WARN)
-        shell.exec(RootOps.forceStop(packageName))
-        val copy = shell.exec(RootOps.copy(backup.path, path.baseApk))
-        val fix = shell.exec(RootOps.fixupApk(path.baseApk))
-        shell.exec(RootOps.clearOat(path.directory))
-        val stat = ShellParsing.stat(shell.exec(RootOps.stat(path.baseApk)).stdout)
-        val hash = ShellParsing.sha256(shell.exec(RootOps.sha256(path.baseApk)).stdout)
-        val ok = copy.ok && fix.ok && stat != null &&
-            stat.owner == "1000:1000" &&
-            stat.mode.trimStart('0') == "644" &&
-            stat.size == backup.sizeBytes && hash == backup.sha256
-        log(
-            if (ok) "rollback verified (${backup.sizeBytes} bytes)" else "ROLLBACK FAILED",
-            if (ok) JobLogLine.Kind.OK else JobLogLine.Kind.ERR,
-        )
-        return ok
     }
 
     // ------------------------------------------------------------------
-
-    private suspend fun runRestore(record: BackupRecord, app: InstalledAppInfo) {
-        val startedAt = System.currentTimeMillis()
-        val jobId = "r-" + System.currentTimeMillis().toString(36)
-        logStore = JobLogStore(context, jobId)
-        _state.value = JobUiState(
-            running = true,
-            jobId = jobId,
-            packageName = app.packageName,
-            title = "Restoring",
-        )
-        JobService.start(context, app.packageName)
-        attachCommandLogging()
-        recovery.write(
-            IncompleteJob(
-                jobId = jobId,
-                packageName = app.packageName,
-                basePath = app.baseApk,
-                backupPath = record.path,
-                startedAt = startedAt,
-            ),
-        )
-
-        try {
-            step(StepId.SWAP, "Restoring ${app.packageName}") {
-                if (!app.baseApk.startsWith("/data/app/") ||
-                    !app.baseApk.endsWith("/base.apk") ||
-                    app.baseApk.contains("..")
-                ) {
-                    throw VeristallerException(
-                        ErrorCode.E_PATH_UNSAFE,
-                        "Refusing to restore outside /data/app",
-                        app.baseApk,
-                    )
-                }
-                shell.exec(RootOps.forceStop(app.packageName))
-                val copy = shell.exec(RootOps.copy(record.path, app.baseApk))
-                if (!copy.ok) {
-                    throw VeristallerException(
-                        ErrorCode.E_ROLLBACK_FAILED,
-                        "Could not copy the backup back",
-                        copy.combined(),
-                    )
-                }
-                val fix = shell.exec(RootOps.fixupApk(app.baseApk))
-                if (!fix.ok) {
-                    throw VeristallerException(
-                        ErrorCode.E_SELINUX_DENIED,
-                        "Could not fix the restored APK owner or label",
-                        fix.combined(),
-                    )
-                }
-                shell.exec(RootOps.clearOat(app.codePath))
-            }
-
-            val stat = ShellParsing.stat(shell.exec(RootOps.stat(app.baseApk)).stdout)
-            val hash = ShellParsing.sha256(shell.exec(RootOps.sha256(app.baseApk)).stdout)
-            if (stat == null || stat.owner != "1000:1000" ||
-                stat.mode.trimStart('0') != "644" ||
-                stat.size != record.sizeBytes || hash != record.sha256
-            ) {
-                throw VeristallerException(
-                    ErrorCode.E_VERIFY_FAILED,
-                    "Restored file does not match the backup (owner, mode, size or sha256)",
-                )
-            }
-
-            history.add(
-                JobRecord(
-                    id = jobId,
-                    packageName = app.packageName,
-                    label = app.label,
-                    versionName = record.versionName,
-                    action = JobRecord.ACTION_RESTORE,
-                    status = JobRecord.STATUS_RESTORED,
-                    basePath = app.baseApk,
-                    backupPath = record.path,
-                    timestamp = startedAt,
-                    durationMs = System.currentTimeMillis() - startedAt,
-                    logPath = logStore?.path(),
-                ),
-            )
-            _state.value = _state.value.copy(
-                running = false,
-                progress = 1f,
-                completed = setOf(StepId.SWAP),
-                outcome = Outcome.Restored(app.packageName, record.versionCode),
-            )
-        } catch (t: Throwable) {
-            val error = toJobError(t)
-            log("restore failed: ${error.message}", JobLogLine.Kind.ERR)
-            history.add(
-                JobRecord(
-                    id = jobId,
-                    packageName = app.packageName,
-                    label = app.label,
-                    versionName = record.versionName,
-                    action = JobRecord.ACTION_RESTORE,
-                    status = JobRecord.STATUS_FAILED,
-                    errorCode = error.code.name,
-                    errorMessage = error.message,
-                    timestamp = startedAt,
-                    durationMs = System.currentTimeMillis() - startedAt,
-                    logPath = logStore?.path(),
-                ),
-            )
-            _state.value = _state.value.copy(running = false, outcome = Outcome.Failed(error))
-        } finally {
-            recovery.clear()
-            detachCommandLogging()
-            JobService.stop(context)
-        }
-    }
-
-    // ------------------------------------------------------------------
-
-    private suspend fun saveRecord(
-        spec: JobSpec,
-        status: String,
-        error: JobError?,
-        basePath: String?,
-        backupPath: String?,
-        startedAt: Long,
-    ): String {
-        val record = JobRecord(
-            id = spec.jobId,
-            packageName = spec.patch.packageName,
-            label = spec.packageLabel,
-            versionName = spec.patch.versionName,
-            action = JobRecord.ACTION_SWAP,
-            status = status,
-            errorCode = error?.code?.name,
-            errorMessage = error?.message,
-            basePath = basePath,
-            backupPath = backupPath,
-            timestamp = startedAt,
-            durationMs = System.currentTimeMillis() - startedAt,
-            logPath = logStore?.path(),
-        )
-        history.add(record)
-        return record.id
-    }
 
     private fun retryableInstall(raw: String): Boolean {
         val text = raw.uppercase()

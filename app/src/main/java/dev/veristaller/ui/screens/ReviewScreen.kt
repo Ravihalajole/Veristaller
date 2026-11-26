@@ -238,7 +238,7 @@ fun ReviewScreen(
                 Text(
                     "${installed?.label ?: patch?.packageName.orEmpty()} will be stopped, the bundle " +
                         "will be installed, and its base.apk replaced with the patched file. " +
-                        "A hash-verified backup is kept first.",
+                        "No backup is taken — reinstall the app to undo the change.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                 )

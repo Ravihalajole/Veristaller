@@ -1,11 +1,6 @@
 package dev.veristaller.platform
 
 import android.content.Context
-import dev.veristaller.data.BackupRepository
-import dev.veristaller.data.HistoryRepository
-import dev.veristaller.data.JobRecovery
-import dev.veristaller.data.SettingsRepository
-import dev.veristaller.data.StagingStore
 import dev.veristaller.domain.ApkInspector
 import dev.veristaller.domain.BundleInspector
 import dev.veristaller.domain.InstalledAppReader
@@ -26,19 +21,12 @@ class AppContainer(context: Context) {
     val bundleInspector = BundleInspector(apkInspector, File(appContext.cacheDir, "inspect"))
     val staging = StagingStore(appContext)
     val settings = SettingsRepository(appContext)
-    val history = HistoryRepository(appContext)
-    val backups = BackupRepository(appContext, rootShell)
-    val recovery = JobRecovery(appContext)
 
     val jobRunner = JobRunner(
         context = appContext,
         shell = rootShell,
         staging = staging,
         bundleInspector = bundleInspector,
-        installedReader = installedReader,
-        backups = backups,
-        history = history,
-        recovery = recovery,
     )
 
     val densityBucket: String =

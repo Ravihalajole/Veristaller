@@ -28,9 +28,6 @@ object JobPlan {
         lines += "find <codePath> -maxdepth 4 -name base.apk"
         lines += "path-guard: test -f <base> -a -w <dir> -a ! -L <base>"
         lines += ""
-        lines += "# backup"
-        lines += "cp -p ${shQuote(spec.installed.baseApk)} ${shQuote("${BackupDir.ROOT}/$pkg/${spec.patch.versionCode}-<ts>/base.apk")}"
-        lines += ""
         lines += "# swap"
         lines += "am force-stop ${shQuote(pkg)}"
         lines += "cp ${shQuote(spec.patch.file.absolutePath)} ${shQuote("${spec.installed.codePath}/.base.apk.vst.tmp")}"
@@ -53,9 +50,5 @@ object JobPlan {
             lines += "monkey -p ${shQuote(pkg)} 1; sleep 5; logcat -d | grep FATAL EXCEPTION"
         }
         return lines
-    }
-
-    private object BackupDir {
-        const val ROOT = "/data/local/tmp/veristaller/backups"
     }
 }

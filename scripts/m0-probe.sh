@@ -2,7 +2,8 @@
 # Veristaller — M0 read-only probe
 #
 # Collects every fact the app needs to resolve and swap an APK, without
-# changing anything. Run from a root shell:
+# changing anything. No backup is taken and nothing is restored; a failed swap
+# is recovered by reinstalling the target app. Run from a root shell:
 #
 #   su -c "sh /sdcard/workspace/Veristaller/scripts/m0-probe.sh com.example.app"
 #

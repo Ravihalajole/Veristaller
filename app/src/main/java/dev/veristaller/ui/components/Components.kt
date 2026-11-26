@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -358,7 +357,6 @@ fun StepStrip(step: StepId?, completed: Set<StepId>) {
 fun BottomNav(
     selected: String,
     onHome: () -> Unit,
-    onHistory: () -> Unit,
     onSettings: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -370,7 +368,6 @@ fun BottomNav(
                 .padding(vertical = 8.dp),
         ) {
             NavItem("Home", Icons.Filled.Home, selected == "home", onHome, Modifier.weight(1f))
-            NavItem("History", Icons.Filled.List, selected == "history", onHistory, Modifier.weight(1f))
             NavItem("Settings", Icons.Filled.Settings, selected == "settings", onSettings, Modifier.weight(1f))
         }
     }

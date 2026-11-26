@@ -27,13 +27,6 @@ class ShellParsingTest {
     }
 
     @Test
-    fun `parses a hash pair in order`() {
-        val first = "a".repeat(64)
-        val second = "b".repeat(64)
-        assertEquals(first to second, ShellParsing.sha256Pair("$first  /x\n$second  /y\n"))
-    }
-
-    @Test
     fun `parses a single hash`() {
         val hash = "0123456789abcdef".repeat(4)
         assertEquals(hash, ShellParsing.sha256("$hash  /data/app/base.apk"))

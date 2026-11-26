@@ -90,12 +90,6 @@ PATCH=/sdcard/Download/notespro-patched.apk
 
 am force-stop $P
 
-# backup
-BK=/data/local/tmp/veristaller/backups/$P/$(date +%s)
-mkdir -p "$BK"
-cp -p "$BASE" "$BK/base.apk"
-sha256sum "$BASE" "$BK/base.apk"
-
 # stage in the same directory (fresh inode, no verity)
 cp "$PATCH" "$DIR/.base.apk.vst.tmp"
 chown 1000:1000 "$DIR/.base.apk.vst.tmp"
@@ -162,18 +156,13 @@ logcat -d -b crash | tail
 |---|---|---|---|
 | | | | |
 
-### Rollback test (AC-3)
+### Failed-swap recovery (AC-3 / AC-5)
 
-```bash
-# restore from the backup taken above
-am force-stop com.notespro.app
-cp -p "$BK/base.apk" "$DIR/base.apk"
-restorecon -F "$DIR/base.apk"
-rm -rf "$DIR/oat"
-pm path com.notespro.app
-```
+There is no backup, restore or rollback. If the experiment leaves `base.apk` missing
+or the app unusable, reinstall the target app from its original bundle before
+continuing.
 
-| Device | Restore ok | App launches |
+| Device | Reinstall ok | App launches |
 |---|---|---|
 | | | |
 
@@ -188,5 +177,6 @@ Copy into `docs/ARCHITECTURE.md` and `docs/PLAN.md` when the spike closes.
 - **Split signature behaviour:**
 - **`chcon` vs `restorecon`:**
 - **Path shapes observed:**
+- **Recovery after a failed swap (reinstall only, no backup):**
 - **Go / no-go for the file-swap approach:**
 - **If no-go, chosen fallback:**

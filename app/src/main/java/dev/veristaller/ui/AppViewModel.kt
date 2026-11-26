@@ -4,10 +4,6 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import dev.veristaller.data.BackupRecord
-import dev.veristaller.data.IncompleteJob
-import dev.veristaller.data.JobLogStore
-import dev.veristaller.data.JobRecord
 import dev.veristaller.data.Settings
 import dev.veristaller.domain.JobPlan
 import dev.veristaller.domain.Preflight
@@ -30,15 +26,12 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val facts = container.probe.facts
     val probing = container.probe.busy
     val job = container.jobRunner.state
-    val history = container.history.records
-    val backups = container.backups.records
 
     /** True once DataStore has emitted, so the disclosure dialog never flashes. */
     private val _settingsReady = MutableStateFlow(false)
@@ -69,16 +62,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     private val _acknowledged = MutableStateFlow<Set<String>>(emptySet())
     val acknowledged: StateFlow<Set<String>> = _acknowledged.asStateFlow()
 
-    /** Set when a previous process died between the backup and verification. */
-    private val _recovery = MutableStateFlow<IncompleteJob?>(container.recovery.read())
-    val recovery: StateFlow<IncompleteJob?> = _recovery.asStateFlow()
-
     init {
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch { container.probe.refresh() }
+        viewModelScope.launch {
+            // Drop a previously denied shell so a grant in KernelSU/Magisk is
+            // picked up without force-stopping the app. Never reset mid-job.
+            if (!job.value.running) withContext(Dispatchers.IO) { container.rootShell.reset() }
+            container.probe.refresh()
+        }
     }
 
     fun importBundle(uri: Uri) {
@@ -213,78 +207,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         installerPackage = current.installerPackage.ifBlank { "com.android.vending" },
         clearOat = current.clearOat,
         dryRun = current.dryRun,
-        keepBackups = current.keepBackups,
         splitMode = current.splitMode,
         verboseLogs = current.verboseLogs,
         smokeTest = current.smokeTest,
     )
 
-    /**
-     * Restore works from history, where the patch may never have been picked,
-     * so the installed app is re-read instead of taken from the selection.
-     */
-    fun restore(record: BackupRecord) {
-        viewModelScope.launch {
-            if (job.value.running) {
-                _error.value = "A job is already running. Wait for it to finish."
-                return@launch
-            }
-            _busy.value = "Looking up ${record.packageName}…"
-            try {
-                val installed = container.installedReader.read(record.packageName)
-                if (installed == null) {
-                    _error.value = "${record.packageName} is not installed. Restore the app first."
-                    return@launch
-                }
-                _installed.value = installed
-                if (!container.jobRunner.restore(record, installed)) {
-                    _error.value = ErrorCode.E_ALREADY_RUNNING.hint
-                }
-            } finally {
-                _busy.value = null
-            }
-        }
-    }
-
-    /** Restore the backup recorded by an interrupted swap. */
-    fun restoreIncomplete() {
-        val incomplete = _recovery.value ?: return
-        val record = backups.value.firstOrNull { it.path == incomplete.backupPath }
-        if (record == null) {
-            _error.value = "Backup ${incomplete.backupPath} is no longer in the list. " +
-                "Use History to restore a different copy."
-            dismissRecovery()
-            return
-        }
-        restore(record)
-        dismissRecovery()
-    }
-
-    fun dismissRecovery() {
-        container.recovery.clear()
-        _recovery.value = null
-    }
-
     fun launchIntent(packageName: String): android.content.Intent? =
         container.installedReader.launchIntent(packageName)
-
-    fun clearHistory() {
-        viewModelScope.launch { container.history.clear() }
-    }
-
-    fun deleteBackup(record: BackupRecord) {
-        viewModelScope.launch { container.backups.delete(record) }
-    }
-
-    fun deleteJob(record: JobRecord) {
-        viewModelScope.launch { container.history.delete(record) }
-    }
-
-    /** Full persisted log for a history row, newest line last. */
-    fun readLog(record: JobRecord): String {
-        val path = record.logPath ?: JobLogStore(container.context, record.id).path()
-        return runCatching { File(path).readText() }.getOrDefault("Log file is no longer available.")
-    }
 
     fun clearSelection() {
         _bundle.value = null

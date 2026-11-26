@@ -20,8 +20,10 @@ It exists because the normal install path cannot express "install this split bun
 then swap only its base APK". Doing it by hand requires locating the randomized
 `/data/app` code path, stopping the app, defeating file verity, restoring
 `system:system 0644` ownership and the `apk_data_file` SELinux label, and clearing
-stale ART artifacts. Veristaller automates that sequence, makes it observable, and
-makes it reversible.
+stale ART artifacts. Veristaller automates that sequence and makes it observable.
+It does **not** take a backup or provide undo: if a swap fails after the original
+`base.apk` was removed, the target app must be reinstalled. This is an accepted
+v0.2 trade-off.
 
 ### 1.1 Problem statement
 
@@ -32,13 +34,15 @@ Given:
 - a rooted device with SELinux enforcing
 
 produce a device state where `P` runs `B`'s code with `A`'s splits, config, native
-libraries and existing user data — safely, repeatably, and with a one-tap undo.
+libraries and existing user data — safely and repeatably. No backup is taken;
+recovery from a failed swap is by reinstalling `P`.
 
 ### 1.2 Goals
 
 - G1. One guided flow from two picked files to a verified running app.
-- G2. Every privileged step is atomic or reversible; a failure never leaves a
-  half-written APK behind.
+- G2. Every privileged step is checked before it runs and failures produce a typed
+  result. A failure after `base.apk` was unlinked can leave the app unusable until
+  it is reinstalled (accepted trade-off).
 - G3. The user can see exactly what will be executed (command preview + full log).
 - G4. Layout-agnostic: works on Android 8 → 16 regardless of how deep the
   code path nests `base.apk`.
@@ -109,6 +113,12 @@ libraries and existing user data — safely, repeatably, and with a one-tap undo
 
 Priority: **M** = must, **S** = should, **C** = could.
 
+> **v0.2 scope note:** FR-6 (Backup), FR-9 (Rollback and restore), FR-10 (History),
+> FR-11.1 (per-job log file), FR-12.2 (retention), FR-13.3 (restore shortcut) and
+> FR-13.4 (interrupted-job recovery) have been removed. No backup is taken, there is
+> no in-app undo/restore, and nothing about jobs is persisted. Recovery from a failed
+> swap is by reinstalling the target app. This is an accepted trade-off, not a bug.
+
 ### FR-1 Root environment
 
 | ID | Req | Pri |
@@ -167,16 +177,6 @@ Priority: **M** = must, **S** = should, **C** = could.
 | FR-5.3 | Require the final path to match `/data/app/**/base.apk` and to belong to the requested package; otherwise abort with `E_PATH_UNSAFE`. | M |
 | FR-5.4 | Confirm the directory is writable by root (`test -w`), is not a symlink outside `/data/app`, and that the path is not on a read-only mount. | M |
 
-### FR-6 Backup
-
-| ID | Req | Pri |
-|---|---|---|
-| FR-6.1 | Before swapping, copy the current `base.apk` to `/data/local/tmp/veristaller/backups/<pkg>/<versionCode>-<epoch>/base.apk`. | M |
-| FR-6.2 | Write a `meta.json` beside it: package, versionCode, versionName, original path, size, sha256, owner/group/mode/SELinux label, SDK, timestamp, patches applied. | M |
-| FR-6.3 | Verify the backup's sha256 matches the source before proceeding. | M |
-| FR-6.4 | Retain the N most recent backups per package (default 3) and prune older ones. | S |
-| FR-6.5 | Surface backups in History with size and one-tap restore. | M |
-
 ### FR-7 Swap and fixup
 
 | ID | Req | Pri |
@@ -191,6 +191,9 @@ Priority: **M** = must, **S** = should, **C** = could.
 | FR-7.8 | When the target is a system app updated in `/data`, swap the `/data` copy, not the system image. | S |
 | FR-7.9 | Emit a machine-readable step event for every command (started / ok / failed, exit code, duration). | M |
 
+There is no rollback path: if a step fails after `base.apk` was replaced, the
+target app must be reinstalled to recover.
+
 ### FR-8 Verification
 
 | ID | Req | Pri |
@@ -200,31 +203,12 @@ Priority: **M** = must, **S** = should, **C** = could.
 | FR-8.3 | Offer "Smoke test": launch via `monkey -p <pkg> 1`, wait 5 s, then scan `logcat -d` for `FATAL EXCEPTION` mentioning the package; report crash / ok / inconclusive. | S |
 | FR-8.4 | Show the resulting app version as reported by PackageManager (`dumpsys package`) if it changed, and note that `lastUpdateTime` is unchanged because the swap bypassed PackageManager. | C |
 
-### FR-9 Rollback and restore
-
-| ID | Req | Pri |
-|---|---|---|
-| FR-9.1 | On any failure after the swap begins, attempt automatic rollback: remove the temp file, restore the backup if `base.apk` is missing or zero-length, re-apply fixups, and report the outcome. | M |
-| FR-9.2 | Manual restore from History: force-stop, copy backup back with fixups, clear `oat/`, verify. | M |
-| FR-9.3 | If automatic rollback fails, keep the backup and show a copyable recovery command block. | M |
-| FR-9.4 | Record every job in history with status, timings, resolved path, error code and log file reference. | M |
-
-### FR-10 History
-
-| ID | Req | Pri |
-|---|---|---|
-| FR-10.1 | List jobs newest first: app label/icon, version, result badge, timestamp, duration. | M |
-| FR-10.2 | Detail view with the full step timeline and the exact commands executed. | S |
-| FR-10.3 | Long-press actions: restore, export log, delete entry (+ optionally delete its backup). | S |
-| FR-10.4 | Cap history at 200 entries with automatic pruning. | C |
-
 ### FR-11 Logging and diagnostics
 
 | ID | Req | Pri |
 |---|---|---|
-| FR-11.1 | Persist a per-job log to `files/logs/<jobId>.log`, including stdout/stderr of every privileged command with timestamps. | M |
 | FR-11.2 | In-app live log tail during the job, monospace, auto-scroll with pause on manual scroll. | S |
-| FR-11.3 | Export a diagnostic bundle (log + device facts + job meta, no signing keys) via SAF `CREATE_DOCUMENT`. | S |
+| FR-11.3 | Export diagnostics (live log + device facts, no signing keys) via SAF `CREATE_DOCUMENT`. | S |
 | FR-11.4 | Redact nothing except certificate fingerprints (kept as truncated hashes). | C |
 
 ### FR-12 Settings
@@ -232,7 +216,6 @@ Priority: **M** = must, **S** = should, **C** = could.
 | ID | Req | Pri |
 |---|---|---|
 | FR-12.1 | Dry run: full preflight and command generation, zero mutations. | M |
-| FR-12.2 | Backup retention count (0–10; 0 disables backup with a red warning). | S |
 | FR-12.3 | Installer attribution package (default `com.android.vending`, free text, validated). | S |
 | FR-12.4 | Clear `oat/` after swap (default on). | S |
 | FR-12.5 | Split filtering mode: smart / ABI-only / all. | S |
@@ -243,10 +226,8 @@ Priority: **M** = must, **S** = should, **C** = could.
 
 | ID | Req | Pri |
 |---|---|---|
-| FR-13.1 | First launch shows a one-time disclosure: this is a root tool, it modifies installed apps, a mistake can require a ROM reflash. Persisted acknowledgement. | M |
-| FR-13.2 | Every destructive action is described in plain language before it runs. | M |
-| FR-13.3 | Emergency "Restore last backup" reachable from Home in ≤ 2 taps. | M |
-| FR-13.4 | If the device reboots mid-job, on next launch detect the incomplete job marker and offer rollback/recovery. | S |
+| FR-13.1 | First launch shows a one-time disclosure: this is a root tool, it modifies installed apps, no backup is taken and a failed swap may require reinstalling the app. Persisted acknowledgement. | M |
+| FR-13.2 | Every destructive action is described in plain language before it runs, including that no backup is taken and recovery means reinstalling the app. | M |
 
 ---
 
@@ -277,8 +258,8 @@ Priority: **M** = must, **S** = should, **C** = could.
 2. Taps **New install** → picks `notespro-4.2.1.apks`; app shows format `bundletool`, 7 splits, 148 MB.
 3. Picks `notespro-patched.apk`; app shows `com.notespro.app` 4.2.1 (4210), cert `a91f…` — differs from installed.
 4. Review screen: 11 checks pass, 2 warnings (cert differs; 1 split not matching device density will be skipped). User acknowledges.
-5. Start → progress: Staging → Installing bundle (pm session, 7/7 written) → Resolving path (`/data/app/~~kQ==/com.notespro.app-Xy==`) → Backing up (sha256 verified) → Swapping → Fixing permissions → Verifying.
-6. Result: green, "Running patched base.apk", path, `system:system 0644 u:object_r:apk_data_file:s0`, backup size. Buttons: Open app, Restore, Export log.
+5. Start → progress: Staging → Installing bundle (pm session, 7/7 written) → Resolving path (`/data/app/~~kQ==/com.notespro.app-Xy==`) → Swapping → Fixing permissions → Verifying.
+6. Result: green, "Running patched base.apk", path, `system:system 0644 u:object_r:apk_data_file:s0`, plus a note that no backup was taken. Buttons: Open app, Export log.
 
 ### UC-2 Install fails
 
@@ -286,11 +267,11 @@ Priority: **M** = must, **S** = should, **C** = could.
 
 ### UC-3 Swap fails at verity
 
-`rm base.apk` succeeds but `mv` fails `EACCES`. App restores the backup, re-labels, verifies, and reports `E_VERITY_LOCKED` with guidance: disable APK verity for the app or use the framework-level signature bypass path instead.
+`rm base.apk` succeeds but `mv` fails `EACCES`. No backup exists to restore: the app reports `E_VERITY_LOCKED`, says the target app may no longer launch, and advises reinstalling it. Future attempts can try disabling APK verity or a framework-level install path instead.
 
-### UC-4 Restore
+### UC-4 Failed-swap recovery
 
-User opens History → last job → **Restore backup**. App force-stops, copies back, fixups, clears `oat/`, verifies, reports "Restored 4.2.1 (4210) stock base.apk".
+After a failed swap the app shows a typed failure and copyable diagnostics. There is no History screen, restore button or automatic recovery: the user reinstalls the target app from its original bundle to get a launchable stock install.
 
 ### UC-5 Dry run
 
@@ -306,6 +287,8 @@ Settings → Dry run on. Same flow, but the Progress screen shows generated comm
 - OBB/data bundle handling for `.xapk` (detected and reported, not installed).
 - Automatic download of bundles.
 - Cloud sync, accounts, telemetry.
+- Backups, history, restore/rollback/undo, retention and interrupted-job recovery;
+  reinstall the target app to recover from a failed swap (accepted trade-off).
 
 ## 8. Acceptance criteria (v1 release)
 
@@ -313,9 +296,9 @@ Settings → Dry run on. Same flow, but the Progress screen shows generated comm
 |---|---|
 | AC-1 | On API 29, 31, 33, 35 and 36, a 3-split sample app is installed and its base APK swapped, and the app launches without crash. |
 | AC-2 | Owner, group, mode and SELinux context of the final `base.apk` exactly match a stock install on the same device. |
-| AC-3 | Injecting a failure at each step (staging, install, backup, swap, fixup, verify) leaves the device in a launchable state — either original or patched. |
+| AC-3 | Injecting a failure at each step (staging, install, swap, fixup, verify) produces a typed result and no crash; a failure after the swap can leave the target app unusable until reinstalled (accepted trade-off). |
 | AC-4 | The app runs with the root prompt denied, showing a clear explanation and no crash. |
-| AC-5 | History restore returns the app to the original APK with a verified hash match. |
+| AC-5 | Reinstalling the target app restores a launchable stock install; this is the only recovery path (no backup or restore exists). |
 | AC-6 | `aapt dump permissions` of Veristaller shows no `INTERNET` permission. |
 | AC-7 | All privileged commands appear verbatim in the job log. |
 | AC-8 | Dry run performs no writes: verified by `find /data/app -newer <marker>` and unchanged `sha256` of the target. |

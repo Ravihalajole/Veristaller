@@ -26,13 +26,6 @@ object ShellParsing {
         )
     }
 
-    /** Parses `sha256sum a b` output into the hashes in order. */
-    fun sha256Pair(output: String): Pair<String, String>? {
-        val hashes = hashes(output)
-        if (hashes.size < 2) return null
-        return hashes[0] to hashes[1]
-    }
-
     /** Parses a single `sha256sum <file>` line. */
     fun sha256(output: String): String? = hashes(output).firstOrNull()
 

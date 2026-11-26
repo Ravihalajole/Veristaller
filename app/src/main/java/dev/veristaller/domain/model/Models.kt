@@ -75,7 +75,6 @@ enum class StepId(val label: String) {
     STAGE("Stage"),
     INSTALL("Install"),
     LOCATE("Locate"),
-    BACKUP("Backup"),
     SWAP("Swap"),
     FIXUP("Fix"),
     VERIFY("Verify"),
@@ -92,7 +91,6 @@ data class JobOptions(
     val installerPackage: String = "com.android.vending",
     val clearOat: Boolean = true,
     val dryRun: Boolean = false,
-    val keepBackups: Int = 3,
     val splitMode: SplitMode = SplitMode.SMART,
     val verboseLogs: Boolean = false,
     val smokeTest: Boolean = false,
@@ -128,7 +126,6 @@ data class SwapDetails(
     val mode: String,
     val selinux: String,
     val sizeBytes: Long,
-    val backupPath: String?,
 )
 
 data class JobError(

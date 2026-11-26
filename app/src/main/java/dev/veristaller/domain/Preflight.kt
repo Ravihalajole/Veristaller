@@ -169,22 +169,6 @@ object Preflight {
             detail = "${formatGb(free)} free · ${formatGb(needed)} needed",
         )
 
-        if (options.keepBackups == 0) {
-            results += CheckResult(
-                id = "retention",
-                severity = Severity.WARN,
-                title = "Backup pruning disabled",
-                detail = "0 keeps every backup; old copies are never removed automatically.",
-            )
-        } else {
-            results += check(
-                id = "retention",
-                ok = true,
-                title = "Backup retention set",
-                detail = "Keep ${options.keepBackups} per package",
-            )
-        }
-
         val pkg = patch?.packageName.orEmpty()
         val hardBlocked = pkg == BuildConfig.APPLICATION_ID ||
             pkg in blockedPackages ||

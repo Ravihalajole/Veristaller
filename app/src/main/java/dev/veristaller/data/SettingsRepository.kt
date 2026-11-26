@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dev.veristaller.domain.model.SplitMode
@@ -18,7 +17,6 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 
 data class Settings(
     val dryRun: Boolean = false,
-    val keepBackups: Int = 3,
     val installerPackage: String = "com.android.vending",
     val clearOat: Boolean = true,
     val splitMode: SplitMode = SplitMode.SMART,
@@ -41,7 +39,6 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { prefs ->
             val next = transform(prefs.toSettings())
             prefs[Keys.DRY_RUN] = next.dryRun
-            prefs[Keys.KEEP_BACKUPS] = next.keepBackups.coerceIn(0, 10)
             prefs[Keys.INSTALLER] = next.installerPackage.trim()
             prefs[Keys.CLEAR_OAT] = next.clearOat
             prefs[Keys.SPLIT_MODE] = next.splitMode.name
@@ -57,7 +54,6 @@ class SettingsRepository(private val context: Context) {
 
     private fun Preferences.toSettings(): Settings = Settings(
         dryRun = this[Keys.DRY_RUN] ?: false,
-        keepBackups = this[Keys.KEEP_BACKUPS] ?: 3,
         installerPackage = this[Keys.INSTALLER] ?: "com.android.vending",
         clearOat = this[Keys.CLEAR_OAT] ?: true,
         splitMode = runCatching {
@@ -74,7 +70,6 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val DRY_RUN = booleanPreferencesKey("dry_run")
-        val KEEP_BACKUPS = intPreferencesKey("keep_backups")
         val INSTALLER = stringPreferencesKey("installer_package")
         val CLEAR_OAT = booleanPreferencesKey("clear_oat")
         val SPLIT_MODE = stringPreferencesKey("split_mode")

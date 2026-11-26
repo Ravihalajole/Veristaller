@@ -19,11 +19,12 @@ object RootOps {
         .line(
             "if [ -d /data/adb/magisk ]; then echo MGR=Magisk; " +
                 "elif [ -d /data/adb/ap ]; then echo MGR=APatch; " +
-                "elif command -v ksud >/dev/null 2>&1; then echo MGR=KernelSU; " +
+                "elif [ -d /data/adb/ksu ] || [ -x /data/adb/ksu/bin/ksud ] || " +
+                "command -v ksud >/dev/null 2>&1; then echo MGR=KernelSU; " +
                 "else echo MGR=su; fi",
         )
         .line(
-            "for t in pm stat find chcon restorecon getenforce sha256sum rm mkdir cp mv am; do " +
+            "for t in pm stat find chcon restorecon getenforce sha256sum rm cp mv am; do " +
                 "command -v \$t >/dev/null 2>&1 || echo \"MISSING=\$t\"; done",
         )
 
@@ -85,26 +86,11 @@ object RootOps {
                 "grep -F ${shQuote(pkg)} || true",
         )
 
-    fun mkdirs(dir: String): ShellScript =
-        ShellScript().line("mkdir -p ${shQuote(dir)}")
-
-    fun copy(src: String, dst: String): ShellScript =
-        ShellScript().line("cp -p ${shQuote(src)} ${shQuote(dst)}")
-
-    fun sha256Pair(first: String, second: String): ShellScript =
-        ShellScript().line("sha256sum ${shQuote(first)} ${shQuote(second)}")
-
     fun sha256(path: String): ShellScript =
         ShellScript().line("sha256sum ${shQuote(path)}")
 
-    fun writeText(path: String, text: String): ShellScript =
-        ShellScript().line("printf '%s' ${shQuote(text)} > ${shQuote(path)}")
-
     fun removeFile(path: String): ShellScript =
         ShellScript().line("rm -f ${shQuote(path)}")
-
-    fun removeTree(path: String): ShellScript =
-        ShellScript().line("rm -rf ${shQuote(path)}")
 
     // ---- install session -------------------------------------------------
 
@@ -137,9 +123,8 @@ object RootOps {
         )
 
     /**
-     * Ownership, mode and label in one go. Used after any operation that may
-     * have created base.apk from scratch (restore, rollback), where a plain
-     * copy would leave it owned by root.
+     * Ownership, mode and label in one go. Used after the swap, where the
+     * staged file has just been moved into place.
      */
     fun fixupApk(path: String): ShellScript = ShellScript().line(
         "chown 1000:1000 ${shQuote(path)} && " +

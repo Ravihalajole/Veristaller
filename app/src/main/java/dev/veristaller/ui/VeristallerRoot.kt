@@ -19,7 +19,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.veristaller.ui.screens.BundleScreen
-import dev.veristaller.ui.screens.HistoryScreen
 import dev.veristaller.ui.screens.HomeScreen
 import dev.veristaller.ui.screens.PatchScreen
 import dev.veristaller.ui.screens.ProgressScreen
@@ -34,7 +33,6 @@ private object Routes {
     const val REVIEW = "review"
     const val PROGRESS = "progress"
     const val RESULT = "result"
-    const val HISTORY = "history"
     const val SETTINGS = "settings"
 }
 
@@ -104,15 +102,8 @@ fun VeristallerRoot(vm: AppViewModel) {
                         nav.navigate(Routes.BUNDLE)
                     }
                 },
-                onHistory = { nav.navigate(Routes.HISTORY) { launchSingleTop = true } },
                 onSettings = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } },
-                onOpenResult = {
-                    if (job.outcome != null) {
-                        nav.navigate(Routes.RESULT) { launchSingleTop = true }
-                    } else {
-                        nav.navigate(Routes.HISTORY) { launchSingleTop = true }
-                    }
-                },
+                onOpenResult = { nav.navigate(Routes.RESULT) { launchSingleTop = true } },
             )
         }
 
@@ -165,15 +156,6 @@ fun VeristallerRoot(vm: AppViewModel) {
                         }
                     }
                 },
-                onHistory = { nav.navigate(Routes.HISTORY) { launchSingleTop = true } },
-            )
-        }
-
-        composable(Routes.HISTORY) {
-            HistoryScreen(
-                vm = vm,
-                onHome = ::goHome,
-                onSettings = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } },
             )
         }
 
@@ -181,7 +163,6 @@ fun VeristallerRoot(vm: AppViewModel) {
             SettingsScreen(
                 vm = vm,
                 onHome = ::goHome,
-                onHistory = { nav.navigate(Routes.HISTORY) { launchSingleTop = true } },
             )
         }
     }
