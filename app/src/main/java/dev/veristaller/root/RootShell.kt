@@ -31,22 +31,29 @@ data class ShellOutput(
 /**
  * Root access for the whole process, serialized with a mutex.
  *
- * The authoritative root check is `su -c "id -u"`, not an interactive shell.
- * libsu verifies a shell by writing `echo SHELL_TEST` and reading a single
- * line back: when the root manager prints a prompt or a banner first
- * (KernelSU does), or when the grant is still pending, that check fails with
- * "Unable to create a shell!" and the app never gets root - even though the
- * grant is perfectly valid. `su -c` has no prompt, returns a real exit code
- * and behaves the same on Magisk, KernelSU and APatch, so it decides whether
- * we have root.
+ * The shape follows the proven root apps: AdAway and Droidify run every
+ * command as a job on one libsu shell (`Shell.cmd(...).exec()`) and ask
+ * `Shell.isAppGrantedRoot()` whether the app is allowed to use it. They never
+ * spawn `su` themselves.
  *
- * A persistent libsu shell is still built on top of that as an optimisation.
- * If libsu refuses to drive the root manager, every command falls back to its
- * own `su -c` invocation: slower, but it works.
+ * Two deliberate differences:
  *
- * libsu's [Shell.getShell] is deliberately not used: its default builder
- * silently falls back to a non-root `sh` and caches it for the process, which
- * makes a grant that arrives later look like a permanent denial.
+ *  - libsu's default builder falls back to a plain `sh` when `su` is not
+ *    usable, and `Shell.getShell()` caches that fallback for the whole
+ *    process - a grant that arrives later would look like a permanent denial.
+ *    We therefore never call `Shell.getShell()`: we build our own shell (a
+ *    shell built outside `MainShell.get()` is never cached by libsu), we
+ *    validate it, and we throw it away when it is not root.
+ *  - the authoritative root check is `su -c "id -u"`, not an interactive
+ *    shell. libsu verifies a shell by writing `echo SHELL_TEST` and reading a
+ *    single line back: when the root manager prints a prompt or a banner
+ *    first, or the grant is still pending, that check fails with "Unable to
+ *    create a shell!" even though the grant is perfectly valid. `su -c` has
+ *    no prompt, returns a real exit code and behaves the same on Magisk,
+ *    KernelSU and APatch.
+ *
+ * If libsu cannot drive the root manager, every command falls back to its own
+ * `su -c` invocation: slower, but it works.
  */
 class RootShell(private val context: Context) {
 
@@ -185,10 +192,14 @@ class RootShell(private val context: Context) {
             lastError = "su (${candidate}) said '$said' instead of uid 0"
         }
 
-        val hint = if (lastError?.contains("denied", ignoreCase = true) == true) {
-            " Grant root to ${context.packageName} in the KernelSU / Magisk / APatch manager."
-        } else {
-            " This device does not look rooted, or su is not reachable from the app sandbox."
+        // The same verdict AdAway asks libsu for: FALSE means there is no su
+        // binary on the app PATH, TRUE means a root shell was confirmed, null
+        // means su exists but the grant was never confirmed.
+        val hint = when (Shell.isAppGrantedRoot()) {
+            false -> " libsu finds no su binary on the app PATH either: the device may not be " +
+                "rooted, or su is only reachable outside it."
+            true -> " libsu confirms root access, but no su answered the uid check."
+            else -> " Grant root to ${context.packageName} in the KernelSU / Magisk / APatch manager."
         }
         return RootCheck(
             error = (lastError ?: "No su binary was found") + ". " + suDiagnostics() + "." + hint,
@@ -211,17 +222,23 @@ class RootShell(private val context: Context) {
         }
     }
 
+    /**
+     * Best effort: a persistent shell is faster than one `su -c` per command,
+     * but it is never required.
+     *
+     * This is the call AdAway and Droidify end up with: libsu starts `su`
+     * itself and verifies the shell. `build("su")` never falls back to a
+     * plain `sh` the way the no-argument builder does, so a failed attempt
+     * can never be mistaken for a working shell.
+     */
     private fun buildPersistentShell(): Shell? {
         val su = suBinary ?: return null
         repeat(PERSISTENT_ATTEMPTS) {
             try {
-                val process = ProcessBuilder(su)
-                    .apply { environment()["PATH"] = rootPath() }
-                    .start()
                 val sh = Shell.Builder.create()
                     .setContext(context)
                     .setTimeout(SHELL_TIMEOUT_SECONDS)
-                    .build(process)
+                    .build(su)
                 if (sh.isRoot()) return sh
                 runCatching { sh.waitAndClose(1, TimeUnit.SECONDS) }
             } catch (t: Throwable) {
@@ -346,9 +363,14 @@ class RootShell(private val context: Context) {
     // su discovery
     // ------------------------------------------------------------------
 
+    /**
+     * Absolute paths first: the winner is then handed to libsu as-is, which
+     * spawns that exact binary instead of resolving `su` through the app's
+     * PATH. The bare `su` is the last resort.
+     */
     private fun suCandidates(): List<String> = buildList {
-        add("su")
         addAll(KNOWN_SU_PATHS)
+        add("su")
     }
 
     /** Standard Android dirs plus the su locations used by root managers. */
