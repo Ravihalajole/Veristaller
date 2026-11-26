@@ -31,7 +31,7 @@ class ApkInspector(private val pm: PackageManager) {
             versionName = info.versionName,
             minSdk = app?.minSdkVersion ?: 0,
             targetSdk = app?.targetSdkVersion ?: 0,
-            abis = listOfNotNull(app?.primaryCpuAbi),
+            abis = abisFromApk(file),
             certSha256 = certSha256(info),
             sizeBytes = file.length(),
         )
@@ -56,6 +56,22 @@ class ApkInspector(private val pm: PackageManager) {
         return MessageDigest.getInstance("SHA-256")
             .digest(bytes)
             .joinToString("") { String.format("%02x", it) }
+    }
+
+    private fun abisFromApk(file: File): List<String> {
+        val found = linkedSetOf<String>()
+        return runCatching {
+            java.util.zip.ZipFile(file).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val name = entries.nextElement().name
+                    if (!name.startsWith("lib/")) continue
+                    val abi = name.removePrefix("lib/").substringBefore('/', missingDelimiterValue = "")
+                    if (abi.isNotEmpty()) found += abi
+                }
+            }
+            found.toList()
+        }.getOrDefault(emptyList())
     }
 
     @Suppress("DEPRECATION")

@@ -466,7 +466,7 @@ class JobRunner(
         if (base.isNullOrBlank()) {
             val dir = dump.ifBlank { paths.firstOrNull()?.substringBeforeLast('/').orEmpty() }
             if (dir.isNotBlank()) {
-                fun findIn(target: String): String? = shell.exec(RootOps.findBase(target))
+                suspend fun findIn(target: String): String? = shell.exec(RootOps.findBase(target))
                     .stdout.trim()
                     .lineSequence()
                     .firstOrNull { it.isNotBlank() }
