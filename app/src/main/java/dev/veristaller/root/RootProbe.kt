@@ -38,10 +38,11 @@ class RootProbe(
     suspend fun refresh() {
         _busy.value = true
         try {
-            if (!shell.isRoot()) {
+            val root = shell.checkRoot()
+            if (!root.ok) {
                 _facts.value = fallback(
-                    "Root not granted to Veristaller. Allow it in KernelSU/Magisk/APatch, " +
-                        "then tap the root chip to re-check.",
+                    root.error ?: "Root not granted to Veristaller. " +
+                        "Allow it in KernelSU/Magisk/APatch, then tap the root chip to re-check.",
                 )
                 return
             }

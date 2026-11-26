@@ -14,7 +14,7 @@ class AppContainer(context: Context) {
     private val appContext = context.applicationContext
     val context: Context get() = appContext
 
-    val rootShell = RootShell()
+    val rootShell = RootShell(appContext)
     val probe = RootProbe(appContext, rootShell)
     val apkInspector = ApkInspector(appContext.packageManager)
     val installedReader = InstalledAppReader(appContext.packageManager, apkInspector)
