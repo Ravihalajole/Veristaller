@@ -322,6 +322,7 @@ private fun ProbeTable(facts: DeviceFacts?) {
         valueColor = if (facts.selinux == "enforcing") TextPrimary else WarningAmber,
     )
     KeyValueRow("Free /data", formatBytes(facts.freeBytes))
+    KeyValueRow("Root shell", facts.shellMode.ifBlank { "—" })
     if (facts.missingTools.isNotEmpty()) {
         KeyValueRow("Missing", facts.missingTools.joinToString(), valueColor = DangerRed)
     }
@@ -435,6 +436,7 @@ private fun diagnostics(
     appendLine("abi=${facts?.abiList?.joinToString() ?: "?"}")
     appendLine("selinux=${facts?.selinux ?: "?"}")
     appendLine("free=${facts?.freeBytes ?: 0}")
+    appendLine("shell=${facts?.shellMode ?: "?"}")
     appendLine("missing=${facts?.missingTools?.joinToString() ?: ""}")
     append("error=${facts?.error ?: ""}")
 }

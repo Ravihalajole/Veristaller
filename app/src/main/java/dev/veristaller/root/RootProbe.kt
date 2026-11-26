@@ -20,6 +20,8 @@ data class DeviceFacts(
     val freeBytes: Long = 0L,
     val missingTools: List<String> = emptyList(),
     val error: String? = null,
+    /** How root is reached: a persistent shell, or one `su -c` per command. */
+    val shellMode: String = "",
 ) {
     val primaryAbi: String get() = abiList.firstOrNull() ?: ""
 }
@@ -49,9 +51,10 @@ class RootProbe(
             val output = shell.exec(RootOps.probe())
             if (!output.ok) {
                 _facts.value = fallback(output.combined().ifBlank { "Root probe failed" })
+                    .copy(shellMode = root.mode)
                 return
             }
-            _facts.value = parse(output.stdout)
+            _facts.value = parse(output.stdout).copy(shellMode = root.mode)
         } finally {
             _busy.value = false
         }

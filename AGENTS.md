@@ -1,31 +1,35 @@
 # Veristaller — agent notes
 
-## Project state
-- Root-only Android tool: installs a split bundle via `pm install-*`, then replaces the installed app's `/data/app/**/base.apk` with a patched APK. No backup or undo is taken: a failed swap can require reinstalling the app. Single module `:app`, package `dev.veristaller` (debug builds are `dev.veristaller.debug`).
-- This workspace holds planning docs, a standalone HTML prototype and a first-pass implementation that has **never been compiled** (no JDK/Gradle/Android SDK here). `TODO.md` is the live milestone/gap list; its unchecked M0/M5 items are real, not stale bookkeeping.
+## What this is
+- Root-only Android tool: installs a split bundle via `pm install-*`, then replaces the installed app's `/data/app/**/base.apk` with a patched APK. No backup or undo: a failed swap can require reinstalling the target app. Single module `:app`, package `dev.veristaller` (debug builds `dev.veristaller.debug`).
+- Also in the tree: planning docs (`docs/`), a standalone clickable prototype (`design/prototype.html`, opens via `file://`, no build step), and `TODO.md` (the live milestone/gap list).
 
 ## Build and verification
-- CI is the build: `.github/workflows/android.yml` (push/PR to `main`/`master`) runs `gradle :app:assembleDebug --stacktrace` then `gradle :app:testDebugUnitTest --stacktrace` with JDK 17, SDK platform 35/build-tools 35.0.0 and Gradle 8.9, then uploads `veristaller-debug`. Verify there, not locally.
-- No Gradle wrapper is committed. A local build needs JDK 17 + SDK 35 and `gradle :app:assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`.
-- `libsu` comes from JitPack behind a content filter that includes only `com.github.topjohnwu.libsu` (`settings.gradle.kts`); another JitPack dependency requires widening that filter.
-- The only unit test is `app/src/test/java/dev/veristaller/root/ShellParsingTest.kt` (JUnit4). No Robolectric or Compose tests exist despite `docs/PLAN.md`.
+- CI is the build: this workspace has no JDK/Gradle/Android SDK and no Gradle wrapper is committed. `.github/workflows/android.yml` (push to `main`/`master` — the repo's default branch is `master` — plus PRs and manual dispatch) runs `gradle :app:assembleDebug --stacktrace` then `gradle :app:testDebugUnitTest --stacktrace` with JDK 17, SDK platform 35 / build-tools 35.0.0 and Gradle 8.9, then uploads the `veristaller-debug` APK artifact. No lint/format task is configured.
+- CI is green as of `22a08b9` (run #7, 2026-11-26). The "never compiled / CI-unverified" claims in `README.md`, `docs/COVERAGE.md` and `TODO.md` M5 are stale — do not re-plan a first build.
+- With JDK 17 + SDK 35 locally: `gradle :app:assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`. Single test: `gradle :app:testDebugUnitTest --tests "dev.veristaller.root.ShellParsingTest"`.
+- `libsu` resolves from JitPack through a content filter that only includes `com.github.topjohnwu.libsu` (`settings.gradle.kts`); any other JitPack dependency needs that `includeGroup` widened.
+- The only unit test is `app/src/test/java/dev/veristaller/root/ShellParsingTest.kt` (JUnit4). No Robolectric, Compose or instrumented tests exist despite `docs/PLAN.md`.
 
 ## Docs vs. code
-- `docs/SRS.md`, `ARCHITECTURE.md`, `PLAN.md`, `UI_SPEC.md` are a plan. When they conflict with `app/build.gradle.kts` / `gradle/libs.versions.toml`, the build files win: actual Kotlin 2.0.21, AGP 8.7.3, libsu 5.2.2, compile/targetSdk 35 (docs say 2.1 / 8.9 / 6.x / 36).
-- `ARCHITECTURE.md` also describes things absent from the tree: Okio, Robolectric, `SwapTransaction.kt`, a `findDeep()` resolver and any recovery marker. Real scripts are `RootOps` lines ending in a `__VST_EXIT:$?` sentinel parsed by `ShellParsing.exitCode`; path resolution lives in `JobRunner.resolve()`.
-- `design/prototype.html` opens directly with `file://.../design/prototype.html` on the phone; no server or build step.
+- `app/build.gradle.kts` + `gradle/libs.versions.toml` win: Kotlin 2.0.21, AGP 8.7.3, libsu 5.2.2, compile/target SDK 35, minSdk 26, no version catalog for lint/detekt.
+- `docs/ARCHITECTURE.md` opens with an "Implementation status" + "Implementation delta" table — trust that table; the body below it still shows the original plan (Kotlin 2.1, AGP 8.9, libsu 6.x, SDK 36, Okio, Robolectric, a `findDeep()` resolver, `SwapTransaction.kt`). None of those exist in the tree.
+- Real mechanics: every privileged command lives in `root/RootOps.kt`; `root/ShellScript.kt` assembles them and appends the `__VST_EXIT:$?` sentinel that `root/ShellParsing.kt` parses for the exit code. Path resolution is `JobRunner.resolve()`, not a `findDeep()` helper.
 
-## Wiring and execution flow
-- Entry chain: `platform/VeristallerApp` → `AppContainer` (manual DI, runs `staging.cleanupOld()`) → `MainActivity` → `AppViewModel` (custom factory) → `ui/VeristallerRoot` NavHost with string routes (home, bundle, patch, review, progress, result, settings). `JobService` is a foreground `dataSync` service; `JobRunner` owns the job `StateFlow`.
-- Privileged layer: `RootShell` is one mutex-serialized persistent shell built explicitly with `su` (never `Shell.getShell()`, which falls back to non-root `sh`); `checkRoot()` verifies `id -u` and `reset()` forces re-acquire after a grant. `ShellScript` + `shQuote` are the only sanctioned way to assemble commands; `RootOps` is the command catalogue; `ShellParsing` parses `stat`, `sha256sum`, exit codes and install-session IDs.
-- `JobRunner` pipeline: stage → install (split ladder SMART → ABI_ONLY → ALL, abandoning failed sessions) → locate → swap → fixup → verify → optional smoke test. One job at a time via `Mutex.tryLock()`. Dry-run stops at `JobPlan.preview` and never touches `/data/app`.
-- Swap stages `.base.apk.vst.tmp` beside `base.apk`, sets `1000:1000` / `0644` / `apk_data_file`, then `rm` + `mv` (fs-verity workaround), `restorecon -F`, clears `oat/`, and verifies size, owner, mode, sha256 and SELinux. Failures leave the app unusable until it is reinstalled.
+## Wiring
+- Entry chain: `platform/VeristallerApp` (calls `staging.cleanupOld()`) → `AppContainer` (manual DI) → `MainActivity` → `AppViewModel` (custom factory) → `ui/VeristallerRoot` NavHost on string routes `home, bundle, patch, review, progress, result, settings`.
+- `JobRunner` owns the job `StateFlow`; `job/JobService.kt` is a foreground `dataSync` notification service only — state is not bound to it.
+- `RootShell` = one mutex-serialized root channel. The authoritative check is `su -c "id -u"` across the known su paths (no prompt, no race, same on Magisk/KernelSU/APatch); libsu's interactive shell is only an optimisation and every command falls back to one `su -c` when libsu cannot drive the manager. It never calls `Shell.getShell()` (that silently falls back to a non-root `sh` and caches it for the process). `reset()` forces re-acquire after a grant; `RootProbe` reports the failure reason and the mode (`persistent` / `one-shot`).
+- `JobRunner` pipeline: stage → install → locate → swap → fixup → verify → optional smoke test. The install ladder retries SMART → ABI_ONLY → ALL, abandoning the failed `pm` session each time and refusing to retry signature-conflict/downgrade errors. One job at a time (`Mutex.tryLock()`); dry run stops at `JobPlan.preview` and never touches `/data/app`.
+- Swap: stage `.base.apk.vst.tmp` next to `base.apk` (`chown 1000:1000`, `chmod 0644`, `chcon u:object_r:apk_data_file:s0`), then `rm` + `mv` (fs-verity workaround, `mv -f` fallback), then `fixupApk` (`chown`/`chmod`/`restorecon -F`), optional `rm -rf oat/ oat_primary/ oat_secondary`, then verify size, owner `1000:1000`, mode `0644`, sha256, SELinux label and `pm path`.
 
 ## Safety invariants (do not relax)
-- SAF URIs are never interpolated into shell commands: `StagingStore` copies selections to app-private files first, and only app-generated absolute paths go through `shQuote`.
-- `JobRunner.resolve()` rejects paths outside `/data/app`, paths containing `..`, and anything not ending in `/base.apk`; extracted zip entry names must match `^[A-Za-z0-9._-]+\.apk$`.
-- Manifest declares no `INTERNET`; it does declare `QUERY_ALL_PACKAGES`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE[_DATA_SYNC]`, and `allowBackup=false`; the debug application id is `dev.veristaller.debug`.
+- SAF URIs are never interpolated into shell commands: `StagingStore.import()` copies the selection into app-private cache first; only app-generated absolute paths reach a command, and only through `shQuote`.
+- `JobRunner.resolve()` requires the path to start with `/data/app/`, end in `/base.apk`, contain no `..` and contain the package name; `RootOps.pathGuard()` then gates on FILE/WRITABLE/NOLINK/SCOPE/NAME. Extracted zip entries must match `^[A-Za-z0-9._-]+\.apk$` and contain no `..`, leading slash or backslash.
+- `JobRunner.runJob()` re-checks root and re-checks warning acknowledgements (UI gating alone is not enough) before touching `/data/app`.
+- Manifest: no `INTERNET`; declares `QUERY_ALL_PACKAGES`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `VIBRATE`; `allowBackup=false`, `fullBackupContent=false`; `JobService` is `exported=false`.
 
 ## Device work
-- M0 is unrun: fs-verity behaviour, post-reboot signature scanning and loading of splits with a re-signed base are unverified. `scripts/m0-probe.sh` is read-only, and `/sdcard` is noexec — run `su -c "sh /sdcard/workspace/Veristaller/scripts/m0-probe.sh <pkg>"` and record results in `docs/SPIKE.md` §4.
-- `TODO.md` v0.1 gaps are real: no job cancel, no persisted job history (the in-memory log is all that exists), no process-death recovery, inline strings with no localization.
+- M0 is still unrun: fs-verity behaviour, post-reboot signature scanning and loading splits with a re-signed base are unverified. `scripts/m0-probe.sh` is read-only; `/sdcard` is noexec, so run `su -c "sh /sdcard/workspace/Veristaller/scripts/m0-probe.sh <pkg>"` and record results in `docs/SPIKE.md` §4.
+- `veristaller-diagnostics.txt` in the repo root is an untracked export from the debug app on the test device (Settings → Export diagnostics). The current one is a Xiaomi 2511FPC34I on Android 16 / SDK 36 and shows root acquisition still failing ("Could not start su: Unable to create a shell!") — the KernelSU grant has to be given to `dev.veristaller.debug`. That is the live blocker, not a code gap.
+- Deliberate v0.1 gaps (real, not bookkeeping): no job cancel, no persisted job history and no process-death recovery (the log is an in-memory ring buffer; it can be exported to a file via SAF `CREATE_DOCUMENT` from Result/Settings), and UI copy is inline except `app_name`/`notification_channel` in `res/values/strings.xml`.

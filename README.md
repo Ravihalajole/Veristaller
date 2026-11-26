@@ -64,7 +64,7 @@ build step.
 | Question | Decision |
 |---|---|
 | Language / UI | Kotlin 2.0.21, Jetpack Compose (BOM 2024.10.01), Material 3, single Activity |
-| Root access | `libsu` (Topjohnwu), one persistent root shell, all scripts built by a quoting-safe builder |
+| Root access | `libsu` (Topjohnwu), root proven with `su -c "id -u"`, one persistent shell when libsu can drive the manager and one `su -c` per command otherwise; all scripts built by a quoting-safe builder |
 | Install mechanism | `pm install-create / install-write / install-commit` as root |
 | Swap mechanism | sibling temp file → `chown 1000:1000` + `chmod 0644` + `chcon apk_data_file` → `rm` + `mv` (fs-verity aware) → `restorecon -F` → clear `oat/` |
 | Path discovery | `pm path` + `codePath` cross-check, then bounded `find` — **never** a hardcoded depth |
