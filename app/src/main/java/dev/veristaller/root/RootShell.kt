@@ -1,12 +1,12 @@
 package dev.veristaller.root
 
 import android.content.Context
-import com.topjohnwu.superuser.NoShellException
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 data class ShellOutput(
@@ -60,40 +60,41 @@ class RootShell(private val context: Context) {
         mutex.withLock {
             resetLocked()
             val started = System.currentTimeMillis()
-            try {
-                val sh = acquireLocked()
-                val out = executeOn(sh, "id -u", started)
-                val lines = out.stdout.lineSequence()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                    .toList()
-                // Some su implementations print a banner before the command
-                // output, so accept any line that proves uid 0.
-                val uid = lines.firstOrNull { it == "0" }
-                    ?: if (lines.any { it.contains("uid=0") }) "0" else lines.firstOrNull()
+            var lastError = "No su binary was available"
+            val candidates = suCommands()
 
-                if (uid == "0") {
-                    shell = sh
-                    RootCheck(uid = uid)
-                } else {
+            for (command in candidates) {
+                try {
+                    val sh = buildShell(command)
+                    val out = executeOn(sh, "id -u", started)
+                    val lines = out.stdout.lineSequence()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .toList()
+                    // Some su implementations print a banner before the command
+                    // output, so accept any line that proves uid 0.
+                    val uid = lines.firstOrNull { it == "0" }
+                        ?: if (lines.any { it.contains("uid=0") }) "0" else lines.firstOrNull()
+
+                    if (uid == "0") {
+                        shell = sh
+                        return@withLock RootCheck(uid = uid)
+                    }
+
                     val detail = out.combined().ifBlank { "no output from id -u" }
+                    lastError = "su ($command) returned uid ${uid ?: "unknown"} instead of 0: $detail"
                     runCatching { sh.waitAndClose(1, TimeUnit.SECONDS) }
-                    RootCheck(
-                        uid = uid,
-                        error = "su returned uid ${uid ?: "unknown"} instead of 0 ($detail). " +
-                            "In KernelSU, check the App Profile uses UID 0 and that " +
-                            "${context.packageName} is in the allow list.",
-                    )
+                } catch (t: Throwable) {
+                    lastError = describeFailure(t, command)
+                    // A pending su prompt needs user action, not another path.
+                    if (lastError.contains("timeout", ignoreCase = true)) break
                 }
-            } catch (t: Throwable) {
-                val message = if (t is NoShellException) {
-                    "Could not start su: ${t.message ?: "su was not found or did not respond"}. " +
-                        "Allow ${context.packageName} in KernelSU, then tap the root chip to re-check."
-                } else {
-                    t.message ?: t.javaClass.simpleName
-                }
-                RootCheck(error = message)
             }
+
+            RootCheck(
+                error = lastError + ". " + suDiagnostics() +
+                    ". Allow ${context.packageName} in KernelSU, then tap the root chip to re-check.",
+            )
         }
     }
 
@@ -104,7 +105,7 @@ class RootShell(private val context: Context) {
         val started = System.currentTimeMillis()
         mutex.withLock {
             try {
-                val sh = shell ?: acquireLocked().also { shell = it }
+                val sh = shell ?: buildShell(suCommands().first()).also { shell = it }
                 executeOn(sh, rendered, started)
             } catch (t: Throwable) {
                 // A dead su process would poison every later command; drop the
@@ -113,7 +114,7 @@ class RootShell(private val context: Context) {
                 val output = ShellOutput(
                     code = -1,
                     stdout = "",
-                    stderr = t.message ?: t.javaClass.simpleName,
+                    stderr = describeFailure(t, suCommands().first()),
                     rendered = rendered,
                     durationMs = System.currentTimeMillis() - started,
                 )
@@ -134,14 +135,33 @@ class RootShell(private val context: Context) {
     }
 
     /**
-     * `build("su")` deliberately bypasses libsu's default builder, which
-     * falls back to `sh` and caches it. A failed su raises NoShellException
-     * instead of quietly giving us an unprivileged shell.
+     * Build libsu's shell around a Process WE start, so we control the PATH.
+     * `build("su")` alone uses the app's inherited PATH, which often omits
+     * KernelSU's `/data/adb/ksu/bin`. Passing the process also bypasses
+     * libsu's default builder, which would fall back to a non-root `sh`.
      */
-    private fun acquireLocked(): Shell = Shell.Builder.create()
-        .setContext(context)
-        .setTimeout(SHELL_TIMEOUT_SECONDS)
-        .build("su")
+    private fun buildShell(command: String): Shell {
+        val process = ProcessBuilder(command)
+            .apply { environment()["PATH"] = rootPath() }
+            .start()
+        return Shell.Builder.create()
+            .setContext(context)
+            .setTimeout(SHELL_TIMEOUT_SECONDS)
+            .build(process)
+    }
+
+    /** Standard Android dirs plus the su locations used by root managers. */
+    private fun rootPath(): String = buildList {
+        add("/system/bin")
+        add("/system/xbin")
+        add("/data/adb/ksu/bin")
+        add("/data/adb/ap/bin")
+        add("/sbin")
+        System.getenv("PATH").orEmpty()
+            .split(File.pathSeparator)
+            .filter { it.isNotBlank() }
+            .forEach { add(it) }
+    }.distinct().joinToString(File.pathSeparator)
 
     private fun executeOn(sh: Shell, rendered: String, started: Long): ShellOutput {
         val job = sh.newJob()
@@ -162,7 +182,49 @@ class RootShell(private val context: Context) {
         return output
     }
 
+    /**
+     * KernelSU/APatch expose su at non-standard paths, and a normal app's PATH
+     * may not include them. Try the usual locations after plain `su`.
+     */
+    private fun suCommands(): List<String> = buildList {
+        add("su")
+        for (path in KNOWN_SU_PATHS) {
+            if (File(path).canExecute()) add(path)
+        }
+    }
+
+    private fun suDiagnostics(): String {
+        val path = System.getenv("PATH").orEmpty()
+        val onPath = path.split(File.pathSeparator)
+            .map { if (it.isBlank()) "." else it }
+            .filter { File(it, "su").canExecute() }
+        val present = KNOWN_SU_PATHS.filter { File(it).canExecute() }
+        return "app PATH=$path; su on app PATH=${onPath.ifEmpty { "none" }}; " +
+            "known su paths present=${present.ifEmpty { "none" }}; root PATH used=${rootPath()}"
+    }
+
+    private fun describeFailure(t: Throwable, command: String): String {
+        val cause = generateSequence(t.cause) { it.cause }
+            .mapNotNull { it.message }
+            .firstOrNull { it.isNotBlank() }
+        val detail = listOfNotNull(t.message, cause?.let { "cause: $it" })
+            .distinct()
+            .joinToString(" · ")
+            .ifBlank { t.javaClass.simpleName }
+        return "Could not start $command: $detail"
+    }
+
     companion object {
-        private const val SHELL_TIMEOUT_SECONDS = 20L
+        // A first KernelSU grant is a notification the user has to tap, so the
+        // default 20s shell-check timeout is often too short.
+        private const val SHELL_TIMEOUT_SECONDS = 60L
+        private val KNOWN_SU_PATHS = listOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/data/adb/ksu/bin/su",
+            "/data/adb/ap/bin/su",
+            "/data/adb/magisk/su",
+        )
     }
 }
