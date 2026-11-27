@@ -323,6 +323,11 @@ private fun ProbeTable(facts: DeviceFacts?) {
     )
     KeyValueRow("Free /data", formatBytes(facts.freeBytes))
     KeyValueRow("Root shell", facts.shellMode.ifBlank { "—" })
+    KeyValueRow("App UID", if (facts.appUid >= 0) facts.appUid.toString() else "—", mono = true)
+    KeyValueRow("Managers", facts.managers.joinToString().ifBlank { "none" })
+    if (facts.appSignature.isNotBlank()) {
+        KeyValueRow("APK cert", facts.appSignature, mono = true)
+    }
     if (facts.missingTools.isNotEmpty()) {
         KeyValueRow("Missing", facts.missingTools.joinToString(), valueColor = DangerRed)
     }
@@ -437,6 +442,9 @@ private fun diagnostics(
     appendLine("selinux=${facts?.selinux ?: "?"}")
     appendLine("free=${facts?.freeBytes ?: 0}")
     appendLine("shell=${facts?.shellMode ?: "?"}")
+    appendLine("appUid=${facts?.appUid ?: -1}")
+    appendLine("appSign=${facts?.appSignature ?: "?"}")
+    appendLine("managers=${facts?.managers?.joinToString() ?: "?"}")
     appendLine("missing=${facts?.missingTools?.joinToString() ?: ""}")
     append("error=${facts?.error ?: ""}")
 }

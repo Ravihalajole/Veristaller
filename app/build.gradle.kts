@@ -13,14 +13,30 @@ android {
         applicationId = "dev.veristaller"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
+    }
+
+    signingConfigs {
+        // Committed, deliberately public key used only for debug builds. CI runs
+        // on a fresh runner, so AGP used to generate a new ~/.android/debug.keystore
+        // every time: every APK had a different certificate, Android refused to
+        // update-install it, and the forced uninstall gave the app a new UID -
+        // silently invalidating the KernelSU/Magisk grant, which is stored per UID.
+        create("stableDebug") {
+            storeFile = rootProject.file("debug.p12")
+            storeType = "PKCS12"
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("stableDebug")
         }
         release {
             isMinifyEnabled = true

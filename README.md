@@ -19,6 +19,9 @@ CI builds every push (`.github/workflows/android.yml`) and uploads a debug APK:
 1. Push the repository to GitHub.
 2. Open **Actions → Android CI → latest run**.
 3. Download the `veristaller-debug` artifact and install it on the rooted device.
+   Debug builds are signed with the committed `debug.p12`, so later builds update
+   in place. If the installer reports a signature mismatch, uninstall the older
+   debug build first (builds before `0.1.1` used a throwaway per-run CI key).
 
 Locally, with JDK 17 and Android SDK 35 installed:
 

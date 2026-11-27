@@ -1,6 +1,7 @@
 package dev.veristaller.root
 
 import android.content.Context
+import android.os.Process
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -32,18 +33,18 @@ data class ShellOutput(
  * Root access for the whole process, serialized with a mutex.
  *
  * The shape follows the proven root apps: AdAway and Droidify run every
- * command as a job on one libsu shell (`Shell.cmd(...).exec()`) and ask
- * `Shell.isAppGrantedRoot()` whether the app is allowed to use it. They never
- * spawn `su` themselves.
+ * command as a job on one libsu shell (`Shell.cmd(...).exec()`), and AdAway
+ * asks `Shell.isAppGrantedRoot()` whether the app may use it. Neither spawns
+ * `su` itself.
  *
  * Two deliberate differences:
  *
- *  - libsu's default builder falls back to a plain `sh` when `su` is not
- *    usable, and `Shell.getShell()` caches that fallback for the whole
- *    process - a grant that arrives later would look like a permanent denial.
- *    We therefore never call `Shell.getShell()`: we build our own shell (a
- *    shell built outside `MainShell.get()` is never cached by libsu), we
- *    validate it, and we throw it away when it is not root.
+ *  - we never call `isAppGrantedRoot()` or `Shell.getShell()`: both go through
+ *    `MainShell.get()`, whose default builder falls back to a plain `sh` when
+ *    `su` is not usable and then caches that shell for the whole process - a
+ *    grant that arrives later would look like a permanent denial. We build our
+ *    own shell (built outside `MainShell.get()`, so libsu never caches it),
+ *    validate it, and throw it away when it is not root.
  *  - the authoritative root check is `su -c "id -u"`, not an interactive
  *    shell. libsu verifies a shell by writing `echo SHELL_TEST` and reading a
  *    single line back: when the root manager prints a prompt or a banner
@@ -153,21 +154,26 @@ class RootShell(private val context: Context) {
      * Ask every known su binary for its uid with a one-shot command. This is
      * the only check the app trusts: it cannot be confused by a prompt, a
      * banner or a pending grant.
+     *
+     * KernelSU needs special care. Its sucompat hook only intercepts
+     * `execve("/system/bin/su")`, and when the calling UID is not in its
+     * allowlist it skips the hook entirely. There is no real file at that
+     * path, so a denied app gets ENOENT - exactly the error a non-rooted
+     * device produces. The message below therefore names the installed root
+     * manager and the app's own UID instead of claiming "no su binary".
      */
     private fun probeWithSu(): RootCheck {
         var lastError: String? = null
+        var kernelSuPathMissing = false
 
         for (candidate in suCandidates()) {
             val result = runSu(candidate, "id -u", PROBE_TIMEOUT_MS)
 
             if (result.timedOut) {
-                return RootCheck(
-                    error = "su (${candidate}) is still waiting for a decision. Grant root to " +
-                        "${context.packageName} in the KernelSU / Magisk / APatch manager, " +
-                        "then tap the root chip to check again.",
-                )
+                return RootCheck(error = pendingGrant(candidate))
             }
             if (result.unusable) {
+                if (candidate == KERNELSU_SU_PATH) kernelSuPathMissing = true
                 lastError = "su (${candidate}) could not be started: ${result.detail}"
                 continue
             }
@@ -189,22 +195,45 @@ class RootShell(private val context: Context) {
             val said = result.stdout.trim()
                 .ifBlank { result.stderr.trim() }
                 .ifBlank { "no output" }
-            lastError = "su (${candidate}) said '$said' instead of uid 0"
+            lastError = "su (${candidate}) exited ${result.code} and said '$said' instead of uid 0"
         }
 
-        // The same verdict AdAway asks libsu for: FALSE means there is no su
-        // binary on the app PATH, TRUE means a root shell was confirmed, null
-        // means su exists but the grant was never confirmed.
-        val hint = when (Shell.isAppGrantedRoot()) {
-            false -> " libsu finds no su binary on the app PATH either: the device may not be " +
-                "rooted, or su is only reachable outside it."
-            true -> " libsu confirms root access, but no su answered the uid check."
-            else -> " Grant root to ${context.packageName} in the KernelSU / Magisk / APatch manager."
-        }
-        return RootCheck(
-            error = (lastError ?: "No su binary was found") + ". " + suDiagnostics() + "." + hint,
-        )
+        return RootCheck(error = describeFailure(lastError, kernelSuPathMissing))
     }
+
+    /**
+     * Magisk and APatch show an approval prompt; KernelSU never does (it is a
+     * binary allow/deny), so this only fires when a manager is really waiting.
+     */
+    private fun pendingGrant(candidate: String): String {
+        val who = RootManagers.installed(context).firstOrNull()?.name ?: "root manager"
+        return "su ($candidate) is still waiting for approval after " +
+            "${PROBE_TIMEOUT_MS / 1000}s. Answer the $who prompt for " +
+            "${context.packageName} (UID ${Process.myUid()}), then tap the root chip to re-check."
+    }
+
+    private fun describeFailure(lastError: String?, kernelSuPathMissing: Boolean): String {
+        val managers = RootManagers.installed(context)
+        val uid = Process.myUid()
+        val hint = if (managers.isNotEmpty()) {
+            val names = managers.joinToString(" or ") { it.name }
+            " $names is installed, so this is a permission problem, not a missing binary: " +
+                "open $names and enable root for ${context.packageName} (UID $uid), " +
+                "then tap the root chip to re-check."
+        } else {
+            " No root manager app is installed, so this device does not look rooted."
+        }
+        val kernelSu = if (kernelSuPathMissing && managers.any { it.isKernelSuFamily() }) {
+            " KernelSU answers a denied app with ENOENT for $KERNELSU_SU_PATH, so that error " +
+                "means this UID is not in its allowlist."
+        } else {
+            ""
+        }
+        return (lastError ?: "No su binary answered") + ". " + suDiagnostics() + "." + kernelSu + hint
+    }
+
+    private fun RootManager.isKernelSuFamily(): Boolean =
+        name.startsWith("KernelSU") || name.startsWith("SukiSU")
 
     /**
      * Best effort: a persistent shell is faster than one `su -c` per command,
@@ -366,7 +395,9 @@ class RootShell(private val context: Context) {
     /**
      * Absolute paths first: the winner is then handed to libsu as-is, which
      * spawns that exact binary instead of resolving `su` through the app's
-     * PATH. The bare `su` is the last resort.
+     * PATH. `/system/bin/su` must come first: KernelSU's sucompat hook
+     * compares the execve path byte for byte against that exact string, so no
+     * other path is intercepted. The bare `su` is the last resort.
      */
     private fun suCandidates(): List<String> = buildList {
         addAll(KNOWN_SU_PATHS)
@@ -392,8 +423,12 @@ class RootShell(private val context: Context) {
             .map { if (it.isBlank()) "." else it }
             .filter { File(it, "su").canExecute() }
         val present = KNOWN_SU_PATHS.filter { File(it).canExecute() }
-        return "app PATH=$path; su on app PATH=${onPath.ifEmpty { "none" }}; " +
-            "known su paths present=${present.ifEmpty { "none" }}; root PATH used=${rootPath()}"
+        val managers = RootManagers.installed(context)
+            .joinToString { "${it.name}(${it.packageName})" }
+            .ifBlank { "none" }
+        return "app UID=${Process.myUid()}; managers=$managers; " +
+            "su on app PATH=${onPath.ifEmpty { "none" }}; " +
+            "known su paths present=${present.ifEmpty { "none" }}"
     }
 
     private fun describe(t: Throwable): String {
@@ -416,8 +451,12 @@ class RootShell(private val context: Context) {
         const val MODE_PERSISTENT = "persistent"
         const val MODE_ONESHOT = "one-shot"
 
-        /** How long a root check may wait for a pending grant. */
-        private const val PROBE_TIMEOUT_MS = 15_000L
+        /**
+         * How long a root check may wait for a pending grant. KernelSU answers
+         * instantly - its grant is a kernel-side allowlist and there is no
+         * prompt - so this only has to cover Magisk/APatch approval dialogs.
+         */
+        private const val PROBE_TIMEOUT_MS = 30_000L
 
         /** Upper bound for a single privileged command. */
         private const val COMMAND_TIMEOUT_MS = 300_000L
@@ -425,8 +464,11 @@ class RootShell(private val context: Context) {
         private const val SHELL_TIMEOUT_SECONDS = 20L
         private const val PERSISTENT_ATTEMPTS = 2
 
+        /** The only path KernelSU's sucompat hook intercepts. */
+        private const val KERNELSU_SU_PATH = "/system/bin/su"
+
         private val KNOWN_SU_PATHS = listOf(
-            "/system/bin/su",
+            KERNELSU_SU_PATH,
             "/system/xbin/su",
             "/sbin/su",
             "/debug_ramdisk/su",
