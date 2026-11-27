@@ -442,6 +442,7 @@ private fun diagnostics(
     appendLine("selinux=${facts?.selinux ?: "?"}")
     appendLine("free=${facts?.freeBytes ?: 0}")
     appendLine("shell=${facts?.shellMode ?: "?"}")
+    appendLine("su=${facts?.suPath ?: "?"}")
     appendLine("appUid=${facts?.appUid ?: -1}")
     appendLine("appSign=${facts?.appSignature ?: "?"}")
     appendLine("managers=${facts?.managers?.joinToString() ?: "?"}")

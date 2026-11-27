@@ -84,6 +84,9 @@ class RootShell(private val context: Context) {
     @Volatile
     private var suBinary: String? = null
 
+    /** Which su answered the last successful probe, for diagnostics. */
+    val activeSuPath: String? get() = suBinary
+
     /** Set by the job engine so every privileged command lands in the job log. */
     @Volatile
     var commandListener: ((ShellOutput) -> Unit)? = null
@@ -297,17 +300,25 @@ class RootShell(private val context: Context) {
     }
 
     private fun executeOn(sh: Shell, rendered: String, started: Long): ShellOutput {
-        val job = sh.newJob()
-        job.add(rendered)
-        val result = job.exec()
+        // libsu 5.x only collects output for a Job when `to(...)` is set:
+        // `newJob()` on its own drains STDOUT/STDERR and reports an empty
+        // result. That silently made every persistent-shell command look like
+        // it succeeded with no output, so `RootProbe` parsed nothing and
+        // reported "no root" on devices where libsu *could* drive the manager.
+        val stdoutLines = ArrayList<String>()
+        val stderrLines = ArrayList<String>()
+        val result = sh.newJob()
+            .add(rendered)
+            .to(stdoutLines, stderrLines)
+            .exec()
         val (stdout, code) = ShellParsing.exitCode(
-            result.out.joinToString("\n"),
+            stdoutLines.joinToString("\n"),
             result.code,
         )
         return ShellOutput(
             code = code,
             stdout = stdout,
-            stderr = result.err.joinToString("\n"),
+            stderr = stderrLines.joinToString("\n"),
             rendered = rendered,
             durationMs = System.currentTimeMillis() - started,
         )

@@ -25,6 +25,8 @@ data class DeviceFacts(
     val error: String? = null,
     /** How root is reached: a persistent shell, or one `su -c` per command. */
     val shellMode: String = "",
+    /** The su binary that answered uid 0 (e.g. /system/bin/su). */
+    val suPath: String = "",
     /** UID this app runs as. KernelSU/Magisk store their grant against it. */
     val appUid: Int = -1,
     /** First 16 hex chars of the APK signing certificate (changes if re-signed). */
@@ -60,14 +62,27 @@ class RootProbe(
                 return
             }
             val output = shell.exec(RootOps.probe())
-            if (!output.ok) {
-                _facts.value = stamp(
-                    fallback(output.combined().ifBlank { "Root probe failed" })
-                        .copy(shellMode = root.mode),
-                )
-                return
-            }
-            _facts.value = stamp(parse(output.stdout).copy(shellMode = root.mode))
+            val parsed = parse(output.stdout)
+            // checkRoot() has already proved uid 0. The probe script may only
+            // *downgrade* that when it really ran and reported another uid: an
+            // empty or failed probe must never turn a working grant into
+            // "no root" (that was the symptom of the libsu output bug).
+            val probeRanAsRoot = parsed.uid.isBlank() || parsed.uid == "0"
+            _facts.value = stamp(
+                parsed.copy(
+                    isRoot = if (parsed.uid.isBlank()) true else parsed.isRoot,
+                    uid = parsed.uid.ifBlank { root.uid ?: "0" },
+                    shellMode = root.mode,
+                    error = when {
+                        !output.ok -> output.combined().ifBlank {
+                            "Root probe exited ${output.code}"
+                        }
+                        output.stdout.isBlank() -> "Root probe returned no output"
+                        !probeRanAsRoot -> "Root probe ran as UID ${parsed.uid} instead of 0"
+                        else -> null
+                    },
+                ),
+            )
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
@@ -88,6 +103,7 @@ class RootProbe(
         appUid = Process.myUid(),
         appSignature = signatureHash(),
         managers = RootManagers.names(context),
+        suPath = shell.activeSuPath.orEmpty(),
     )
 
     private fun signatureHash(): String = runCatching {

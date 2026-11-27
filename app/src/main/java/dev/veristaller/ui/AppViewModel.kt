@@ -67,10 +67,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun refresh() {
+        // Never reset the shell while a job is using it, and do not stack
+        // probes: init, ON_RESUME and a chip tap can all fire together.
+        if (job.value.running || probing.value) return
         viewModelScope.launch {
-            // Drop a previously denied shell so a grant in KernelSU/Magisk is
-            // picked up without force-stopping the app. Never reset mid-job.
-            if (!job.value.running) withContext(Dispatchers.IO) { container.rootShell.reset() }
+            // checkRoot() drops a previously denied shell itself, so a grant
+            // made in KernelSU/Magisk is picked up without force-stopping.
             container.probe.refresh()
         }
     }

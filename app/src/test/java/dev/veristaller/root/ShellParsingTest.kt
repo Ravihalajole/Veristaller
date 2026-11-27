@@ -40,6 +40,14 @@ class ShellParsingTest {
     }
 
     @Test
+    fun `keeps probe values when stripping the sentinel`() {
+        val raw = "UID=0\nSDK=36\nMGR=KernelSU\n__VST_EXIT:0\n"
+        val (clean, code) = ShellParsing.exitCode(raw, -1)
+        assertEquals(0, code)
+        assertEquals("UID=0\nSDK=36\nMGR=KernelSU", clean)
+    }
+
+    @Test
     fun `guard is safe only when every check passes`() {
         val good = ShellParsing.guard(
             "FILE=1\nWRITABLE=1\nNOLINK=1\nSCOPE=1\nNAME=1\n",
