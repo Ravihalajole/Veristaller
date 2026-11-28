@@ -51,10 +51,9 @@ target app must be reinstalled (accepted v0.2 trade-off).
 ## M4 — UI
 
 - [x] Theme (dark / light / system, dynamic colour on API 31+)
-- [x] Home + disclosure dialog
-- [x] Pick bundle / pick patch
-- [x] Review (checks, acks, command preview)
-- [x] Progress (stepper + live log)
+- [x] Home
+- [x] Single install screen (bundle picker + patch picker + checks)
+- [x] Progress (live log)
 - [x] Result (success / fail / dry-run)
 - [x] Settings
 - [x] Navigation

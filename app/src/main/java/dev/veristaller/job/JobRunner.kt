@@ -130,16 +130,8 @@ class JobRunner(
                 )
             }
 
-            // Re-check the warning gate here, not only in the UI, so no other
-            // start path can bypass an explicit acknowledgement.
-            val missingAcks = spec.requiredWarnings - spec.acknowledgedWarnings
-            if (missingAcks.isNotEmpty()) {
-                throw VeristallerException(
-                    ErrorCode.E_ACK_REQUIRED,
-                    "Acknowledge the warnings before starting: ${missingAcks.joinToString()}",
-                )
-            }
-
+            // Re-check root here, not only in the UI, so no other start path
+            // can touch /data/app without it.
             log("${spec.patch.packageName} ${spec.patch.versionName ?: ""} · job ${spec.jobId}", JobLogLine.Kind.OK)
             val selected = bundleInspector.select(
                 spec.bundle,

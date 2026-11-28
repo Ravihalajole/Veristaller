@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.veristaller.data.Settings
-import dev.veristaller.domain.JobPlan
 import dev.veristaller.domain.Preflight
 import dev.veristaller.domain.model.ApkInfo
 import dev.veristaller.domain.model.BundleInfo
@@ -22,7 +21,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,12 +31,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val probing = container.probe.busy
     val job = container.jobRunner.state
 
-    /** True once DataStore has emitted, so the disclosure dialog never flashes. */
-    private val _settingsReady = MutableStateFlow(false)
-    val settingsReady: StateFlow<Boolean> = _settingsReady.asStateFlow()
-
     val settings: StateFlow<Settings> = container.settings.flow
-        .onEach { _settingsReady.value = true }
         .stateIn(viewModelScope, SharingStarted.Eagerly, Settings())
 
     private val _bundle = MutableStateFlow<BundleInfo?>(null)
@@ -58,9 +51,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
-
-    private val _acknowledged = MutableStateFlow<Set<String>>(emptySet())
-    val acknowledged: StateFlow<Set<String>> = _acknowledged.asStateFlow()
 
     init {
         refresh()
@@ -91,7 +81,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
                 _bundle.value = info
-                _acknowledged.value = emptySet()
                 val patchPackage = _patch.value?.packageName
                 if (patchPackage != null && patchPackage == info.packageName) {
                     loadInstalled(info.packageName)
@@ -120,7 +109,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     container.apkInspector.inspect(staged.file)
                 }
                 _patch.value = info
-                _acknowledged.value = emptySet()
                 loadInstalled(info.packageName)
             } catch (t: Throwable) {
                 _error.value = t.message ?: "Could not read this APK"
@@ -134,14 +122,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val info = container.installedReader.read(packageName)
         _installed.value = info
         _appRunning.value = info != null && container.probe.isRunning(packageName)
-    }
-
-    fun toggleAck(id: String) {
-        _acknowledged.value = if (id in _acknowledged.value) {
-            _acknowledged.value - id
-        } else {
-            _acknowledged.value + id
-        }
     }
 
     /** Splits this device would install for [mode], using the current facts. */
@@ -166,11 +146,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         splits = selectedSplits(),
     )
 
-    fun previewCommands(): List<String> {
-        val spec = buildSpec() ?: return emptyList()
-        return JobPlan.preview(spec, selectedSplits())
-    }
-
     fun startJob() {
         val spec = buildSpec() ?: return
         if (job.value.running) {
@@ -185,23 +160,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun buildSpec(): JobSpec? {
         val bundle = _bundle.value ?: return null
         val patch = _patch.value ?: return null
-        val installed = _installed.value ?: return null
         val device = facts.value ?: return null
         return JobSpec(
             jobId = "j-" + System.currentTimeMillis().toString(36),
             bundle = bundle,
             patch = patch,
-            installed = installed,
+            installed = _installed.value,
             options = options(settings.value),
             deviceAbis = device.abiList,
             densityBucket = container.densityBucket,
             deviceLocales = container.deviceLocales,
-            packageLabel = installed.label,
-            acknowledgedWarnings = _acknowledged.value,
-            requiredWarnings = checks()
-                .filter { it.severity == CheckResult.Severity.WARN && it.requiresAck }
-                .map { it.id }
-                .toSet(),
+            packageLabel = _installed.value?.label ?: patch.packageName,
         )
     }
 
@@ -217,28 +186,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun launchIntent(packageName: String): android.content.Intent? =
         container.installedReader.launchIntent(packageName)
 
-    fun clearSelection() {
-        _bundle.value = null
-        _patch.value = null
-        _installed.value = null
-        _appRunning.value = false
-        _acknowledged.value = emptySet()
-        _error.value = null
-        container.jobRunner.clearOutcome()
-    }
-
     fun dismissError() {
         _error.value = null
-    }
-
-    fun reopenDisclosure() {
-        viewModelScope.launch { container.settings.update { it.copy(disclosureAccepted = false) } }
-    }
-
-    fun acceptDisclosure() {
-        viewModelScope.launch {
-            container.settings.update { it.copy(disclosureAccepted = true) }
-        }
     }
 
     fun updateSettings(transform: (Settings) -> Settings) {

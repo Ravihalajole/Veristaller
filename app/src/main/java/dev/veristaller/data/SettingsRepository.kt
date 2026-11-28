@@ -22,7 +22,6 @@ data class Settings(
     val splitMode: SplitMode = SplitMode.SMART,
     val dynamicColor: Boolean = false,
     val keepScreenOn: Boolean = true,
-    val disclosureAccepted: Boolean = false,
     val theme: String = "system",
     val vibrate: Boolean = true,
     val verboseLogs: Boolean = false,
@@ -44,7 +43,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SPLIT_MODE] = next.splitMode.name
             prefs[Keys.DYNAMIC_COLOR] = next.dynamicColor
             prefs[Keys.KEEP_SCREEN_ON] = next.keepScreenOn
-            prefs[Keys.DISCLOSURE] = next.disclosureAccepted
             prefs[Keys.THEME] = next.theme
             prefs[Keys.VIBRATE] = next.vibrate
             prefs[Keys.VERBOSE] = next.verboseLogs
@@ -61,7 +59,6 @@ class SettingsRepository(private val context: Context) {
         }.getOrDefault(SplitMode.SMART),
         dynamicColor = this[Keys.DYNAMIC_COLOR] ?: false,
         keepScreenOn = this[Keys.KEEP_SCREEN_ON] ?: true,
-        disclosureAccepted = this[Keys.DISCLOSURE] ?: false,
         theme = this[Keys.THEME] ?: "system",
         vibrate = this[Keys.VIBRATE] ?: true,
         verboseLogs = this[Keys.VERBOSE] ?: false,
@@ -75,7 +72,6 @@ class SettingsRepository(private val context: Context) {
         val SPLIT_MODE = stringPreferencesKey("split_mode")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
-        val DISCLOSURE = booleanPreferencesKey("disclosure_accepted")
         val THEME = stringPreferencesKey("theme")
         val VIBRATE = booleanPreferencesKey("vibrate")
         val VERBOSE = booleanPreferencesKey("verbose_logs")

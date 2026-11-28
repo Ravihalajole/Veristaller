@@ -100,14 +100,12 @@ data class JobSpec(
     val jobId: String,
     val bundle: BundleInfo,
     val patch: ApkInfo,
-    val installed: InstalledAppInfo,
+    val installed: InstalledAppInfo? = null,
     val options: JobOptions,
     val deviceAbis: List<String>,
     val densityBucket: String,
     val packageLabel: String,
     val deviceLocales: Set<String> = emptySet(),
-    val acknowledgedWarnings: Set<String> = emptySet(),
-    val requiredWarnings: Set<String> = emptySet(),
 )
 
 data class CheckResult(
@@ -115,7 +113,6 @@ data class CheckResult(
     val severity: Severity,
     val title: String,
     val detail: String,
-    val requiresAck: Boolean = severity == Severity.WARN,
 ) {
     enum class Severity { PASS, WARN, FAIL }
 }

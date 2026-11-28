@@ -1,5 +1,7 @@
 package dev.veristaller.ui.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,7 +15,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -24,43 +25,36 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.veristaller.domain.model.CheckResult
-import dev.veristaller.domain.model.StepId
 import dev.veristaller.ui.theme.Bg
 import dev.veristaller.ui.theme.DangerRed
-import dev.veristaller.ui.theme.InfoPurple
 import dev.veristaller.ui.theme.MonoStyle
 import dev.veristaller.ui.theme.OutlineColor
 import dev.veristaller.ui.theme.PrimaryBlue
 import dev.veristaller.ui.theme.SuccessGreen
 import dev.veristaller.ui.theme.SurfaceHigh
 import dev.veristaller.ui.theme.SurfaceLow
-import dev.veristaller.ui.theme.SurfaceTop
 import dev.veristaller.ui.theme.TextPrimary
 import dev.veristaller.ui.theme.TextSecondary
 import dev.veristaller.ui.theme.TextTertiary
@@ -76,7 +70,6 @@ fun ScreenFrame(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     footer: (@Composable () -> Unit)? = null,
-    bottom: (@Composable () -> Unit)? = null,
     scroll: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -103,7 +96,6 @@ fun ScreenFrame(
             Column(modifier = body.padding(horizontal = 20.dp), content = content)
         }
         footer?.invoke()
-        bottom?.invoke()
     }
 }
 
@@ -121,22 +113,7 @@ fun AppBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SurfaceLow)
-                    .border(1.dp, OutlineColor, RoundedCornerShape(14.dp))
-                    .clickable(onClickLabel = "Back", onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            IconAction(Icons.Filled.ArrowBack, "Back", onBack)
             Spacer(Modifier.width(12.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
@@ -156,6 +133,26 @@ fun AppBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             content = actions,
         )
+    }
+}
+
+/** Square, borderless icon button used in the app bar and inline actions. */
+@Composable
+fun IconAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tint: Color = TextSecondary,
+) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(SurfaceHigh)
+            .clickable(onClickLabel = label, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -230,12 +227,9 @@ fun MonoText(text: String, color: Color = TextPrimary, modifier: Modifier = Modi
     Text(text = text, modifier = modifier, style = MonoStyle, color = color)
 }
 
+/** One preflight result: icon, title and detail. No acknowledgement step. */
 @Composable
-fun CheckRowView(
-    check: CheckResult,
-    acknowledged: Boolean,
-    onToggleAck: (String) -> Unit,
-) {
+fun CheckRow(check: CheckResult) {
     val tint = when (check.severity) {
         CheckResult.Severity.PASS -> SuccessGreen
         CheckResult.Severity.WARN -> WarningAmber
@@ -246,7 +240,7 @@ fun CheckRowView(
         CheckResult.Severity.WARN -> Icons.Filled.Warning
         CheckResult.Severity.FAIL -> Icons.Filled.Close
     }
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 9.dp)) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
         Box(
             modifier = Modifier
                 .size(24.dp)
@@ -264,142 +258,7 @@ fun CheckRowView(
                 color = TextPrimary,
             )
             Text(check.detail, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-            if (check.requiresAck) {
-                Row(
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (acknowledged) SuccessGreen.copy(alpha = 0.1f) else SurfaceHigh)
-                        .border(
-                            1.dp,
-                            if (acknowledged) SuccessGreen.copy(alpha = 0.4f) else OutlineColor,
-                            RoundedCornerShape(9.dp),
-                        )
-                        .clickable(
-                            onClickLabel = if (acknowledged) {
-                                "Clear acknowledgement: ${check.title}"
-                            } else {
-                                "Acknowledge: ${check.title}"
-                            },
-                            onClick = { onToggleAck(check.id) },
-                        )
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Check,
-                        contentDescription = null,
-                        tint = if (acknowledged) SuccessGreen else TextTertiary,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = if (acknowledged) "Acknowledged" else "I understand",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (acknowledged) SuccessGreen else TextSecondary,
-                    )
-                }
-            }
         }
-    }
-}
-
-@Composable
-fun StepStrip(step: StepId?, completed: Set<StepId>) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        StepId.entries.forEach { id ->
-            val done = id in completed
-            val active = id == step
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(15.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                done -> SuccessGreen
-                                active -> PrimaryBlue
-                                else -> SurfaceTop
-                            },
-                        )
-                        .border(
-                            1.dp,
-                            if (active) PrimaryBlue else OutlineColor,
-                            CircleShape,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (active && !done) {
-                        Box(
-                            Modifier.size(5.dp).clip(CircleShape).background(Color(0xFF00243D)),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = id.label,
-                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp, fontSize = 9.sp),
-                    color = if (done || active) TextPrimary else TextTertiary,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun BottomNav(
-    selected: String,
-    onHome: () -> Unit,
-    onSettings: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(OutlineColor.copy(alpha = 0.6f)))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceHigh)
-                .padding(vertical = 8.dp),
-        ) {
-            NavItem("Home", Icons.Filled.Home, selected == "home", onHome, Modifier.weight(1f))
-            NavItem("Settings", Icons.Filled.Settings, selected == "settings", onSettings, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun NavItem(
-    label: String,
-    icon: ImageVector,
-    active: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .heightIn(min = 48.dp)
-            .clickable(onClickLabel = label, onClick = onClick)
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = if (active) PrimaryBlue else TextTertiary,
-            modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp, fontSize = 10.sp),
-            color = if (active) PrimaryBlue else TextTertiary,
-        )
     }
 }
 
@@ -407,6 +266,7 @@ private fun NavItem(
 fun PrimaryButton(
     text: String,
     enabled: Boolean = true,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -416,6 +276,10 @@ fun PrimaryButton(
         shape = RoundedCornerShape(16.dp),
         modifier = modifier.fillMaxWidth().height(52.dp),
     ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(8.dp))
+        }
         Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -424,6 +288,7 @@ fun PrimaryButton(
 fun TonalButton(
     text: String,
     onClick: () -> Unit,
+    icon: ImageVector? = null,
     modifier: Modifier = Modifier,
 ) {
     OutlinedButton(
@@ -431,13 +296,17 @@ fun TonalButton(
         shape = RoundedCornerShape(16.dp),
         modifier = modifier.fillMaxWidth().height(52.dp),
     ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+        }
         Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
 /** Writes a text snapshot to a user-chosen location through SAF. */
 @Composable
-fun ExportLogButton(text: String, fileName: String, content: () -> String) {
+private fun rememberExporter(fileName: String, content: () -> String): () -> Unit {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -450,40 +319,44 @@ fun ExportLogButton(text: String, fileName: String, content: () -> String) {
             }
         }
     }
-    TonalButton(text = text, onClick = { launcher.launch(fileName) })
+    return { launcher.launch(fileName) }
 }
 
 @Composable
-fun InfoNote(text: String, tint: Color = InfoPurple) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Box(
-            Modifier
-                .padding(top = 5.dp)
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(tint),
-        )
+fun ExportLogButton(text: String, fileName: String, content: () -> String) {
+    val launch = rememberExporter(fileName, content)
+    TonalButton(text = text, onClick = launch)
+}
+
+@Composable
+fun ExportLogTextButton(text: String, fileName: String, content: () -> String) {
+    val launch = rememberExporter(fileName, content)
+    TextButton(onClick = launch) {
+        Text(text, color = PrimaryBlue)
+    }
+}
+
+/** Dismissable inline error with an icon. */
+@Composable
+fun ErrorBox(message: String, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(DangerRed.copy(alpha = 0.08f))
+            .border(1.dp, DangerRed.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .clickable(onClickLabel = "Dismiss", onClick = onDismiss)
+            .padding(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(Icons.Filled.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(10.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        Text(message, style = MaterialTheme.typography.bodySmall, color = DangerRed)
     }
 }
 
 fun formatClock(epochMs: Long): String =
     SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(epochMs))
-
-fun formatDateTime(epochMs: Long): String =
-    SimpleDateFormat("d MMM · HH:mm", Locale.getDefault()).format(Date(epochMs))
-
-fun formatRelative(epochMs: Long): String {
-    val diff = System.currentTimeMillis() - epochMs
-    val minutes = diff / 60000L
-    return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "$minutes min ago"
-        minutes < 1440 -> "${minutes / 60} h ago"
-        else -> "${minutes / 1440} d ago"
-    }
-}
 
 fun formatBytes(bytes: Long): String = when {
     bytes >= 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f GB", bytes / 1073741824.0)

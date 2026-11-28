@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -22,19 +24,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -42,22 +39,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.veristaller.domain.model.SplitMode
 import dev.veristaller.root.DeviceFacts
 import dev.veristaller.ui.AppViewModel
-import dev.veristaller.ui.components.BottomNav
 import dev.veristaller.ui.components.ExportLogButton
 import dev.veristaller.ui.components.KeyValueRow
-import dev.veristaller.ui.components.MonoText
 import dev.veristaller.ui.components.Pill
 import dev.veristaller.ui.components.ScreenFrame
 import dev.veristaller.ui.components.SectionLabel
 import dev.veristaller.ui.components.VeriCard
 import dev.veristaller.ui.components.formatBytes
 import dev.veristaller.ui.theme.DangerRed
-import dev.veristaller.ui.theme.InfoPurple
 import dev.veristaller.ui.theme.OutlineColor
 import dev.veristaller.ui.theme.PrimaryBlue
 import dev.veristaller.ui.theme.SuccessGreen
 import dev.veristaller.ui.theme.SurfaceHigh
-import dev.veristaller.ui.theme.SurfaceLow
 import dev.veristaller.ui.theme.TextPrimary
 import dev.veristaller.ui.theme.TextSecondary
 import dev.veristaller.ui.theme.TextTertiary
@@ -66,12 +59,11 @@ import dev.veristaller.ui.theme.WarningAmber
 @Composable
 fun SettingsScreen(
     vm: AppViewModel,
-    onHome: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val facts by vm.facts.collectAsStateWithLifecycle()
     val probing by vm.probing.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
 
     var installer by rememberSaveable(settings.installerPackage) {
         mutableStateOf(settings.installerPackage)
@@ -79,31 +71,20 @@ fun SettingsScreen(
 
     ScreenFrame(
         title = "Settings",
-        subtitle = "execution · safety · diagnostics",
-        bottom = {
-            BottomNav(
-                selected = "settings",
-                onHome = onHome,
-                onSettings = {},
-            )
-        },
+        onBack = onBack,
     ) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
         SectionLabel("Execution")
         VeriCard {
             ToggleRow(
                 title = "Dry run",
-                detail = "Print the commands without installing or replacing anything.",
+                detail = "Print the commands without changing anything.",
                 checked = settings.dryRun,
                 onCheckedChange = { value -> vm.updateSettings { it.copy(dryRun = value) } },
             )
             Divider()
-            Text(
-                "Split filtering",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextPrimary,
-            )
+            Text("Split filtering", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
             Text(
                 "Smart keeps only the ABIs and density this device uses.",
                 style = MaterialTheme.typography.bodySmall,
@@ -118,25 +99,50 @@ fun SettingsScreen(
             Divider()
             ToggleRow(
                 title = "Clear compiled code",
-                detail = "Deletes oat/ so Android recompiles the patched APK.",
+                detail = "Delete oat/ so Android recompiles the patched APK.",
                 checked = settings.clearOat,
                 onCheckedChange = { value -> vm.updateSettings { it.copy(clearOat = value) } },
             )
             Divider()
             ToggleRow(
-                title = "Smoke test after swap",
-                detail = "Launch the patched app once and scan logcat for a fatal crash.",
+                title = "Smoke test",
+                detail = "Launch the app once and scan logcat for a crash.",
                 checked = settings.smokeTest,
                 onCheckedChange = { value -> vm.updateSettings { it.copy(smokeTest = value) } },
             )
-            Divider()
-            Text(
-                "Installer package",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextPrimary,
+        }
+
+        Spacer(Modifier.height(14.dp))
+        SectionLabel("Appearance")
+        VeriCard {
+            Text("Theme", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+            Spacer(Modifier.height(8.dp))
+            ChoiceRow(
+                options = listOf("system" to "System", "dark" to "Dark", "light" to "Light"),
+                selected = settings.theme,
+                onSelect = { value -> vm.updateSettings { it.copy(theme = value) } },
             )
+            Spacer(Modifier.height(8.dp))
+            ToggleRow(
+                title = "Dynamic colour",
+                detail = "Use Android 12+ wallpaper colours.",
+                checked = settings.dynamicColor,
+                onCheckedChange = { value -> vm.updateSettings { it.copy(dynamicColor = value) } },
+            )
+            Divider()
+            ToggleRow(
+                title = "Vibrate on finish",
+                detail = "A short pulse when a job ends.",
+                checked = settings.vibrate,
+                onCheckedChange = { value -> vm.updateSettings { it.copy(vibrate = value) } },
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+        SectionLabel("Installer")
+        VeriCard {
             Text(
-                "Reported to PackageManager as the installer. Default com.android.vending.",
+                "Reported to PackageManager as the installing app.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
             )
@@ -176,60 +182,17 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(14.dp))
-        SectionLabel("Safety")
-        VeriCard {
-            Text(
-                "No backup is taken before a swap. If a swap fails, reinstall the app to recover.",
-                style = MaterialTheme.typography.bodySmall,
-                color = WarningAmber,
-            )
-            Divider()
-            Text("Theme", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-            Spacer(Modifier.height(8.dp))
-            ChoiceRow(
-                options = listOf("system" to "System", "dark" to "Dark", "light" to "Light"),
-                selected = settings.theme,
-                onSelect = { value -> vm.updateSettings { it.copy(theme = value) } },
-            )
-            Spacer(Modifier.height(8.dp))
-            ToggleRow(
-                title = "Dynamic colour",
-                detail = "Use Android 12+ wallpaper colours.",
-                checked = settings.dynamicColor,
-                onCheckedChange = { value -> vm.updateSettings { it.copy(dynamicColor = value) } },
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-        SectionLabel("Feedback")
-        VeriCard {
-            ToggleRow(
-                title = "Vibrate when a job finishes",
-                detail = "A short pulse on success or failure.",
-                checked = settings.vibrate,
-                onCheckedChange = { value -> vm.updateSettings { it.copy(vibrate = value) } },
-            )
-            Divider()
-            ToggleRow(
-                title = "Verbose command output",
-                detail = "Include every command's stdout and stderr in the job log.",
-                checked = settings.verboseLogs,
-                onCheckedChange = { value -> vm.updateSettings { it.copy(verboseLogs = value) } },
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-        SectionLabel("Diagnostics")
+        SectionLabel("Root")
         VeriCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
+                    Text("Status", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
                     Text(
-                        "Root probe",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextPrimary,
-                    )
-                    Text(
-                        if (probing) "checking…" else "Last run now",
+                        text = when {
+                            probing -> "checking…"
+                            facts?.isRoot == true -> facts?.shellMode?.ifBlank { "granted" } ?: "granted"
+                            else -> "not granted"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                     )
@@ -247,30 +210,27 @@ fun SettingsScreen(
                     },
                     background = SurfaceHigh,
                 )
-            }
-            Spacer(Modifier.height(8.dp))
-            ProbeTable(facts)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.width(4.dp))
                 TextButton(onClick = vm::refresh) {
                     Icon(
                         Icons.Filled.Refresh,
-                        contentDescription = null,
+                        contentDescription = "Re-run probe",
                         tint = PrimaryBlue,
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.size(17.dp),
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text("Re-run", color = PrimaryBlue, fontWeight = FontWeight.SemiBold)
-                }
-                TextButton(onClick = {
-                    clipboard.setText(AnnotatedString(diagnostics(facts, settings)))
-                }) {
-                    Text("Copy diagnostics", color = TextSecondary)
                 }
             }
+            ProbeTable(facts)
             Spacer(Modifier.height(8.dp))
+            ToggleRow(
+                title = "Verbose log",
+                detail = "Include every command's stdout and stderr.",
+                checked = settings.verboseLogs,
+                onCheckedChange = { value -> vm.updateSettings { it.copy(verboseLogs = value) } },
+            )
+            Spacer(Modifier.height(4.dp))
             ExportLogButton(
-                text = "Export diagnostics to a file",
+                text = "Export diagnostics",
                 fileName = "veristaller-diagnostics.txt",
                 content = { diagnostics(facts, settings) },
             )
@@ -279,26 +239,9 @@ fun SettingsScreen(
         Spacer(Modifier.height(14.dp))
         SectionLabel("About")
         VeriCard {
-            KeyValueRow("Veristaller", dev.veristaller.BuildConfig.VERSION_NAME)
-            KeyValueRow("Storage", "root only · /data/app")
-            KeyValueRow("Network", "none — no INTERNET permission")
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Everything runs on this device. Nothing is uploaded.",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextTertiary,
-            )
-            Divider()
-            TextButton(onClick = { vm.reopenDisclosure() }) {
-                Text("Re-read the modification disclosure", color = PrimaryBlue)
-            }
-            Text(
-                "Licences: Android Open Source Project (Apache 2.0), Kotlin (Apache 2.0), " +
-                    "Jetpack Compose (Apache 2.0), libsu (Apache 2.0), " +
-                    "kotlinx.serialization (Apache 2.0).",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextTertiary,
-            )
+            KeyValueRow("Version", dev.veristaller.BuildConfig.VERSION_NAME)
+            KeyValueRow("Scope", "root · /data/app")
+            KeyValueRow("Network", "none")
         }
 
         Spacer(Modifier.height(20.dp))
@@ -311,10 +254,10 @@ private fun ProbeTable(facts: DeviceFacts?) {
         Text("No probe data yet.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         return
     }
+    Spacer(Modifier.height(6.dp))
     KeyValueRow("Manager", facts.manager.ifBlank { "—" })
     KeyValueRow("uid", facts.uid.ifBlank { "—" }, mono = true)
     KeyValueRow("Android", "${facts.release} · SDK ${facts.sdk}")
-    KeyValueRow("Device", facts.model)
     KeyValueRow("ABI", facts.abiList.joinToString().ifBlank { "—" })
     KeyValueRow(
         "SELinux",
@@ -323,11 +266,6 @@ private fun ProbeTable(facts: DeviceFacts?) {
     )
     KeyValueRow("Free /data", formatBytes(facts.freeBytes))
     KeyValueRow("Root shell", facts.shellMode.ifBlank { "—" })
-    KeyValueRow("App UID", if (facts.appUid >= 0) facts.appUid.toString() else "—", mono = true)
-    KeyValueRow("Managers", facts.managers.joinToString().ifBlank { "none" })
-    if (facts.appSignature.isNotBlank()) {
-        KeyValueRow("APK cert", facts.appSignature, mono = true)
-    }
     if (facts.missingTools.isNotEmpty()) {
         KeyValueRow("Missing", facts.missingTools.joinToString(), valueColor = DangerRed)
     }
@@ -360,19 +298,16 @@ private fun ToggleRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             enabled = enabled,
-            colors = switchColors(),
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = PrimaryBlue,
+                checkedTrackColor = PrimaryBlue.copy(alpha = 0.3f),
+                uncheckedThumbColor = TextTertiary,
+                uncheckedTrackColor = SurfaceHigh,
+                uncheckedBorderColor = OutlineColor,
+            ),
         )
     }
 }
-
-@Composable
-private fun switchColors() = SwitchDefaults.colors(
-    checkedThumbColor = PrimaryBlue,
-    checkedTrackColor = PrimaryBlue.copy(alpha = 0.3f),
-    uncheckedThumbColor = TextTertiary,
-    uncheckedTrackColor = SurfaceHigh,
-    uncheckedBorderColor = OutlineColor,
-)
 
 @Composable
 private fun <T> ChoiceRow(

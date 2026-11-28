@@ -14,6 +14,10 @@ object JobPlan {
         val lines = ArrayList<String>()
         val pkg = spec.patch.packageName
         val total = splits.sumOf { it.sizeBytes }
+        // The code path is only known after the install step; before that the
+        // installed app may not exist at all.
+        val codePath = spec.installed?.codePath ?: "<codePath>"
+        val baseApk = spec.installed?.baseApk ?: "<base.apk>"
         lines += "# stage"
         lines += "cp <bundle> -> /data/local/tmp/veristaller/stage/${spec.jobId}/"
         lines += "pm install-create -r -S ${total.coerceAtLeast(0)} -i ${shQuote(spec.options.installerPackage)} --user 0"
@@ -30,21 +34,21 @@ object JobPlan {
         lines += ""
         lines += "# swap"
         lines += "am force-stop ${shQuote(pkg)}"
-        lines += "cp ${shQuote(spec.patch.file.absolutePath)} ${shQuote("${spec.installed.codePath}/.base.apk.vst.tmp")}"
+        lines += "cp ${shQuote(spec.patch.file.absolutePath)} ${shQuote("$codePath/.base.apk.vst.tmp")}"
         lines += "chown 1000:1000 <tmp> && chmod 0644 <tmp> && chcon u:object_r:apk_data_file:s0 <tmp>"
-        lines += "rm -f ${shQuote(spec.installed.baseApk)}"
-        lines += "mv <tmp> ${shQuote(spec.installed.baseApk)}"
+        lines += "rm -f ${shQuote(baseApk)}"
+        lines += "mv <tmp> ${shQuote(baseApk)}"
         lines += ""
         lines += "# fixup"
-        lines += "restorecon -F ${shQuote(spec.installed.baseApk)} || chcon u:object_r:apk_data_file:s0 <file>"
+        lines += "restorecon -F ${shQuote(baseApk)} || chcon u:object_r:apk_data_file:s0 <file>"
         if (spec.options.clearOat) {
-            lines += "rm -rf ${shQuote("${spec.installed.codePath}/oat")}"
+            lines += "rm -rf ${shQuote("$codePath/oat")}"
         }
         lines += ""
         lines += "# verify"
-        lines += "stat -c '%u %g %a %s' ${shQuote(spec.installed.baseApk)}"
-        lines += "sha256sum ${shQuote(spec.patch.file.absolutePath)} ${shQuote(spec.installed.baseApk)}"
-        lines += "ls -Z ${shQuote(spec.installed.baseApk)}"
+        lines += "stat -c '%u %g %a %s' ${shQuote(baseApk)}"
+        lines += "sha256sum ${shQuote(spec.patch.file.absolutePath)} ${shQuote(baseApk)}"
+        lines += "ls -Z ${shQuote(baseApk)}"
         lines += "pm path ${shQuote(pkg)}"
         if (spec.options.smokeTest) {
             lines += "monkey -p ${shQuote(pkg)} 1; sleep 5; logcat -d | grep FATAL EXCEPTION"

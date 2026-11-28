@@ -69,10 +69,6 @@ enum class ErrorCode(val title: String, val hint: String) {
         "A job is already running",
         "Wait for the current job to finish.",
     ),
-    E_ACK_REQUIRED(
-        "Warnings were not acknowledged",
-        "Return to Review and tick each warning before starting.",
-    ),
     E_ALREADY_INSTALLED_CONFLICT(
         "Existing install has a different signature",
         "Uninstall the current app (this erases its data) or use a matching bundle.",

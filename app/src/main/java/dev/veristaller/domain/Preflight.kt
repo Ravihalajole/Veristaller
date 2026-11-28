@@ -91,20 +91,19 @@ object Preflight {
                 detail = "bundle $bundleVersionCode · patch $patchVersionCode",
             )
         } else {
-            results += check(
-                id = "version",
-                ok = sameVersion,
-                title = if (sameVersion) "Version codes match" else "Version unknown",
-                detail = if (sameVersion) "${patch?.versionCode}" else "Could not read both versions",
-            )
+            results += if (sameVersion) {
+                check(id = "version", ok = true, title = "Version codes match", detail = "${patch?.versionCode}")
+            } else {
+                warn(id = "version", title = "Version unknown", detail = "Could not read both versions")
+            }
         }
 
         results += check(
             id = "installed",
-            ok = installed != null,
-            title = if (installed == null) "App is not installed" else "App is installed",
+            ok = true,
+            title = if (installed == null) "Fresh install" else "App is installed",
             detail = installed?.let { "${it.versionName ?: "?"} (${it.versionCode})" }
-                ?: "Install the bundle first, then swap",
+                ?: "The bundle is installed first, then base.apk is replaced",
         )
 
         // PackageManager rejects a lower versionCode, so stop before touching anything.
@@ -116,29 +115,37 @@ object Preflight {
                 severity = Severity.FAIL,
                 title = "Installed app is newer than the bundle",
                 detail = "installed ${installed.versionCode} · bundle $bundleVersionCode — uninstall first",
-                requiresAck = false,
             )
         }
 
         val certsKnown = installed != null && patch != null &&
             installed.certSha256.isNotEmpty() && patch.certSha256.isNotEmpty()
         val sameCert = certsKnown && installed?.certSha256 == patch?.certSha256
-        if (certsKnown && !sameCert) {
+        if (installed == null) {
+            results += check(
+                id = "signature",
+                ok = true,
+                title = "Signing key not compared",
+                detail = "Nothing installed yet",
+            )
+        } else if (certsKnown && !sameCert) {
             results += CheckResult(
                 id = "signature",
                 severity = Severity.WARN,
                 title = "Signing key differs",
-                detail = "Installed ${installed?.certSha256?.take(8)} · patch ${patch?.certSha256?.take(8)}. " +
-                    "The installed splits keep their own signing key; a differently signed base " +
-                    "may be rejected on reboot.",
+                detail = "Installed ${installed.certSha256.take(8)} · patch ${patch?.certSha256?.take(8)}",
             )
         } else {
-            results += check(
-                id = "signature",
-                ok = sameCert,
-                title = if (sameCert) "Signing key matches" else "Signing key unknown",
-                detail = if (sameCert) "base.apk is signed by the installed key" else "No certificate data",
-            )
+            results += if (sameCert) {
+                check(
+                    id = "signature",
+                    ok = true,
+                    title = "Signing key matches",
+                    detail = "base.apk is signed by the installed key",
+                )
+            } else {
+                warn(id = "signature", title = "Signing key unknown", detail = "No certificate data")
+            }
         }
 
         val supportedAbis = facts?.abiList.orEmpty()
@@ -179,15 +186,14 @@ object Preflight {
                 severity = Severity.FAIL,
                 title = "Refusing this target",
                 detail = "System, self or root-manager package — $pkg",
-                requiresAck = false,
             )
         } else if (pkg.startsWith("com.android.")) {
-            // Non-core system components are allowed only with an explicit ack.
+            // Non-core system components are flagged, not blocked.
             results += CheckResult(
                 id = "safe",
                 severity = Severity.WARN,
                 title = "System component selected",
-                detail = "$pkg is part of the system image. Only continue if you know what it does.",
+                detail = "$pkg is part of the system image",
             )
         } else {
             results += check(
@@ -226,8 +232,10 @@ object Preflight {
             severity = if (ok) Severity.PASS else Severity.FAIL,
             title = title,
             detail = detail,
-            requiresAck = false,
         )
+
+    private fun warn(id: String, title: String, detail: String): CheckResult =
+        CheckResult(id = id, severity = Severity.WARN, title = title, detail = detail)
 
     private fun formatGb(bytes: Long): String {
         val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)

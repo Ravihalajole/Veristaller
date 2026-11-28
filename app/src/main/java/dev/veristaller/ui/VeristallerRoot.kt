@@ -18,19 +18,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import dev.veristaller.ui.screens.BundleScreen
 import dev.veristaller.ui.screens.HomeScreen
-import dev.veristaller.ui.screens.PatchScreen
+import dev.veristaller.ui.screens.InstallScreen
 import dev.veristaller.ui.screens.ProgressScreen
 import dev.veristaller.ui.screens.ResultScreen
-import dev.veristaller.ui.screens.ReviewScreen
 import dev.veristaller.ui.screens.SettingsScreen
 
 private object Routes {
     const val HOME = "home"
-    const val BUNDLE = "bundle"
-    const val PATCH = "patch"
-    const val REVIEW = "review"
+    const val INSTALL = "install"
     const val PROGRESS = "progress"
     const val RESULT = "result"
     const val SETTINGS = "settings"
@@ -90,46 +86,40 @@ fun VeristallerRoot(vm: AppViewModel) {
         }
     }
 
+    fun openInstall() {
+        if (job.running) {
+            nav.navigate(Routes.PROGRESS) { launchSingleTop = true }
+        } else {
+            // Selections are kept on purpose: a repeat install is one tap.
+            nav.navigate(Routes.INSTALL) { launchSingleTop = true }
+        }
+    }
+
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
             HomeScreen(
                 vm = vm,
-                onNewInstall = {
-                    if (job.running) {
-                        nav.navigate(Routes.PROGRESS) { launchSingleTop = true }
-                    } else {
-                        vm.clearSelection()
-                        nav.navigate(Routes.BUNDLE)
+                onInstall = { openInstall() },
+                onSettings = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                onOpenResult = {
+                    nav.navigate(Routes.RESULT) {
+                        launchSingleTop = true
+                        popUpTo(Routes.HOME) { inclusive = false }
                     }
                 },
-                onSettings = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } },
-                onOpenResult = { nav.navigate(Routes.RESULT) { launchSingleTop = true } },
             )
         }
 
-        composable(Routes.BUNDLE) {
-            BundleScreen(
-                vm = vm,
-                onBack = { nav.popBackStack() },
-                onNext = { nav.navigate(Routes.PATCH) },
-            )
-        }
-
-        composable(Routes.PATCH) {
-            PatchScreen(
-                vm = vm,
-                onBack = { nav.popBackStack() },
-                onNext = { nav.navigate(Routes.REVIEW) },
-            )
-        }
-
-        composable(Routes.REVIEW) {
-            ReviewScreen(
+        composable(Routes.INSTALL) {
+            InstallScreen(
                 vm = vm,
                 onBack = { nav.popBackStack() },
                 onStart = {
                     vm.startJob()
-                    nav.navigate(Routes.PROGRESS) { launchSingleTop = true }
+                    nav.navigate(Routes.PROGRESS) {
+                        launchSingleTop = true
+                        popUpTo(Routes.HOME) { inclusive = false }
+                    }
                 },
             )
         }
@@ -143,17 +133,10 @@ fun VeristallerRoot(vm: AppViewModel) {
                 vm = vm,
                 onHome = ::goHome,
                 onTryAgain = {
-                    if (vm.bundle.value != null && vm.patch.value != null) {
-                        nav.navigate(Routes.REVIEW) {
-                            launchSingleTop = true
-                            popUpTo(Routes.HOME) { inclusive = false }
-                        }
-                    } else {
-                        vm.clearSelection()
-                        nav.navigate(Routes.BUNDLE) {
-                            launchSingleTop = true
-                            popUpTo(Routes.HOME) { inclusive = false }
-                        }
+                    // Selections are kept, so a retry is one tap away.
+                    nav.navigate(Routes.INSTALL) {
+                        launchSingleTop = true
+                        popUpTo(Routes.HOME) { inclusive = false }
                     }
                 },
             )
@@ -162,7 +145,7 @@ fun VeristallerRoot(vm: AppViewModel) {
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 vm = vm,
-                onHome = ::goHome,
+                onBack = { nav.popBackStack() },
             )
         }
     }

@@ -2,12 +2,10 @@ package dev.veristaller.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -18,31 +16,24 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.veristaller.domain.model.JobLogLine
+import dev.veristaller.domain.model.Outcome
 import dev.veristaller.domain.model.StepId
 import dev.veristaller.ui.AppViewModel
-import dev.veristaller.ui.components.PrimaryButton
 import dev.veristaller.ui.components.ScreenFrame
-import dev.veristaller.ui.components.SectionLabel
-import dev.veristaller.ui.components.StepStrip
+import dev.veristaller.ui.components.TonalButton
 import dev.veristaller.ui.components.formatClock
 import dev.veristaller.ui.theme.DangerRed
 import dev.veristaller.ui.theme.MonoStyle
@@ -60,60 +51,40 @@ import dev.veristaller.ui.theme.WarningAmber
 fun ProgressScreen(vm: AppViewModel, onHome: () -> Unit) {
     val job by vm.job.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    var paused by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(job.log.size, paused) {
-        if (!paused && job.log.isNotEmpty()) {
-            listState.animateScrollToItem(job.log.lastIndex)
-        }
+    LaunchedEffect(job.log.size) {
+        if (job.log.isNotEmpty()) listState.animateScrollToItem(job.log.lastIndex)
     }
 
     ScreenFrame(
         title = job.packageName.ifBlank { "Working" },
-        subtitle = if (job.running) "Do not close the app" else "Finished",
+        subtitle = if (job.running) "Installing" else "Finished",
         scroll = false,
         footer = {
             Column(modifier = Modifier.padding(20.dp)) {
-                PrimaryButton(
-                    text = if (job.running) "Run in background" else "Continue",
+                TonalButton(
+                    text = if (job.running) "Hide" else "Continue",
                     onClick = onHome,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = if (job.running) {
-                        "The job keeps running while this screen stays open. Closing the app can stop it mid-swap."
-                    } else {
-                        "The result screen has the details."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary,
                 )
             }
         },
     ) {
-        Spacer(Modifier.height(4.dp))
-        StepStrip(step = job.step, completed = job.completed)
-        if (job.outcome is dev.veristaller.domain.model.Outcome.Failed) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Stopped at ${job.step?.label ?: "an early check"}. See the log below.",
-                style = MaterialTheme.typography.bodySmall,
-                color = DangerRed,
-            )
-        }
+        Spacer(Modifier.height(6.dp))
 
-        Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = job.title.ifBlank { "Starting…" },
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                 )
                 val index = job.step?.let { StepId.entries.indexOf(it) + 1 } ?: 0
                 Text(
-                    text = if (job.step != null) "Step $index of ${StepId.entries.size}" else job.detail,
+                    text = if (job.step != null) {
+                        "${job.step?.label} · step $index of ${StepId.entries.size}"
+                    } else {
+                        job.detail
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                 )
@@ -121,7 +92,7 @@ fun ProgressScreen(vm: AppViewModel, onHome: () -> Unit) {
             if (job.running) {
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(8.dp)
                         .clip(CircleShape)
                         .background(PrimaryBlue),
                 )
@@ -151,18 +122,16 @@ fun ProgressScreen(vm: AppViewModel, onHome: () -> Unit) {
             )
         }
 
-        Spacer(Modifier.height(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Log")
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { paused = !paused }) {
-                Text(if (paused) "Resume" else "Pause", color = PrimaryBlue)
-            }
-            TextButton(onClick = { expanded = true }) {
-                Text("Expand", color = PrimaryBlue)
-            }
+        if (job.outcome is Outcome.Failed) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Stopped at ${job.step?.label ?: "an early check"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = DangerRed,
+            )
         }
 
+        Spacer(Modifier.height(16.dp))
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -171,19 +140,11 @@ fun ProgressScreen(vm: AppViewModel, onHome: () -> Unit) {
                 .clip(RoundedCornerShape(14.dp))
                 .background(TerminalBg)
                 .border(1.dp, OutlineColor, RoundedCornerShape(14.dp))
-                .pointerInput(Unit) {
-                    // Any manual drag pauses auto-scroll until Resume is tapped.
-                    detectVerticalDragGestures { _, _ -> paused = true }
-                }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             if (job.log.isEmpty()) {
                 item {
-                    Text(
-                        "waiting for the first command…",
-                        style = MonoStyle,
-                        color = TextTertiary,
-                    )
+                    Text("waiting for the first command…", style = MonoStyle, color = TextTertiary)
                 }
             }
             items(job.log) { line ->
@@ -191,23 +152,6 @@ fun ProgressScreen(vm: AppViewModel, onHome: () -> Unit) {
             }
         }
         Spacer(Modifier.height(10.dp))
-    }
-
-    if (expanded) {
-        AlertDialog(
-            onDismissRequest = { expanded = false },
-            title = { Text("Full job log") },
-            text = {
-                androidx.compose.foundation.lazy.LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    items(job.log) { line -> LogRow(line) }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { expanded = false }) { Text("Close") }
-            },
-        )
     }
 }
 
