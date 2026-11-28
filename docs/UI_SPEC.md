@@ -3,6 +3,12 @@
 Interactive prototype: `design/prototype.html` (open in the phone browser).
 Design board: same file, toggle **Board** in the top bar to see every screen at once.
 
+> **Superseded (v0.2 flow):** S2 (Bundle), S3 (Patch) and S4 (Review) are now one
+> `InstallScreen` — two picker tiles, one Install button, preflight checks behind a
+> collapsed "Details" row. S8 (first-run disclosure) and every acknowledgement step
+> are gone; only hard preflight FAILs disable Install. The sections below are kept as
+> the original design record.
+>
 > **Implementation note:** every screen below exists as a Compose screen under
 > `app/src/main/java/dev/veristaller/ui/screens/`. The type scale in §2 is applied
 > in `ui/theme/Type.kt`, the palette in `ui/theme/Color.kt`, and static a11y work
